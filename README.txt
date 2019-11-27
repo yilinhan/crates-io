@@ -11,6 +11,7 @@ bitflags                      1.2.1
 bstr                          0.2.8
 bumpalo                       2.6.0
 byteorder                     1.3.2
+bytes                         0.4.12
 c2-chacha                     0.2.3
 cc                            1.0.47
 cfg-if                        0.1.10
@@ -36,6 +37,7 @@ env_logger                    0.7.1
 exitfailure                   0.5.1
 failure                       0.1.6
 failure_derive                0.1.6
+fixedbitset                   0.1.9
 fnv                           1.0.6
 fuchsia-cprng                 0.1.1
 getrandom                     0.1.13
@@ -47,6 +49,8 @@ httparse                      1.3.4
 humantime                     1.3.0
 ignore                        0.4.10
 indexmap                      1.3.0
+iovec                         0.1.4
+itertools                     0.8.2
 itoa                          0.4.4
 js-sys                        0.3.32
 lazy_static                   1.4.0
@@ -54,6 +58,7 @@ libc                          0.2.65
 log                           0.4.8
 memchr                        2.2.1
 memoffset                     0.5.3
+multimap                      0.4.0
 nan-preserving-float          0.1.0
 net2                          0.2.33
 nix                           0.13.1
@@ -63,11 +68,16 @@ num-bigint                    0.2.3
 num-integer                   0.1.41
 num-traits                    0.2.10
 num_cpus                      1.11.1
+petgraph                      0.4.13
 ppv-lite86                    0.2.6
 pretty_env_logger             0.2.5
 privdrop                      0.2.2
 proc-macro2                   0.4.30
 proc-macro2                   1.0.6
+prost                         0.5.0
+prost-build                   0.5.0
+prost-derive                  0.5.0
+prost-types                   0.5.0
 quick-error                   1.2.2
 quicli                        0.4.0
 quote                         0.6.13
@@ -115,6 +125,7 @@ structopt-derive              0.2.18
 syn                           0.15.44
 syn                           1.0.8
 synstructure                  0.12.3
+tempfile                      3.1.0
 termcolor                     1.0.5
 textwrap                      0.11.0
 thread_local                  0.3.6
@@ -144,6 +155,7 @@ web-sys                       0.3.32
 webpki                        0.21.0
 webpki-roots                  0.17.0
 weedle                        0.10.0
+which                         2.0.1
 winapi                        0.3.8
 winapi-i686-pc-windows-gnu    0.4.0
 winapi-util                   0.1.2

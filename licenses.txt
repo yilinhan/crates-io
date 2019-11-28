@@ -1,11 +1,11 @@
 ignore: Unlicense/MIT
-fuchsia-cprng: see license file at fuchsia-cprng/license_file
+fuchsia-cprng: see license file at fuchsia-cprng/LICENSE
 unicode-xid-0.1.0: MIT/Apache-2.0
 quicli: MIT OR Apache-2.0
 thread_local: Apache-2.0/MIT
 clap-port-flag: MIT OR Apache-2.0
 humantime: MIT/Apache-2.0
-sgx_types: see license file at sgx_types/license_file
+sgx_types: see license file at sgx_types/LICENSE
 clap-verbosity-flag: MIT OR Apache-2.0
 num-traits: MIT/Apache-2.0
 time: MIT/Apache-2.0
@@ -24,13 +24,13 @@ num-bigint: MIT/Apache-2.0
 rand_core-0.3.1: MIT/Apache-2.0
 backtrace-sys: MIT/Apache-2.0
 rdrand: ISC
-sgx_unwind: see license file at sgx_unwind/license_file
+sgx_unwind: see license file at sgx_unwind/LICENSE
 fnv: Apache-2.0 / MIT
 sourcefile: Apache-2.0/MIT
 winapi-util: Unlicense/MIT
 log: MIT OR Apache-2.0
 redox_syscall: MIT
-sgx_demangle: see license file at sgx_demangle/license_file
+sgx_demangle: see license file at sgx_demangle/LICENSE
 webpki-roots: MPL-2.0
 unicode-width: MIT/Apache-2.0
 which: MIT
@@ -40,7 +40,7 @@ lazy_static: MIT/Apache-2.0
 aho-corasick: Unlicense/MIT
 wasm-bindgen-shared: MIT/Apache-2.0
 indexmap: Apache-2.0/MIT
-sgx_tcrypto: see license file at sgx_tcrypto/license_file
+sgx_tcrypto: see license file at sgx_tcrypto/LICENSE
 wabt-sys: Apache-2.0
 rand-0.6.5: MIT/Apache-2.0
 crossbeam-utils-0.6.6: MIT/Apache-2.0
@@ -71,8 +71,8 @@ nom: MIT
 synstructure: MIT
 rayon: Apache-2.0/MIT
 fixedbitset: MIT/Apache-2.0
-sgx_alloc: see license file at sgx_alloc/license_file
-sgx_trts: see license file at sgx_trts/license_file
+sgx_alloc: see license file at sgx_alloc/LICENSE
+sgx_trts: see license file at sgx_trts/LICENSE
 rdrand-0.4.0: ISC
 heck: MIT OR Apache-2.0
 rand_chacha-0.1.1: MIT/Apache-2.0
@@ -88,11 +88,11 @@ env_logger: MIT/Apache-2.0
 wasi: Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
 same-file: Unlicense/MIT
 prost: Apache-2.0
-sgx_urts: see license file at sgx_urts/license_file
+sgx_urts: see license file at sgx_urts/LICENSE
 unicode-xid: MIT OR Apache-2.0
 crossbeam-queue: MIT/Apache-2.0 AND BSD-2-Clause
 proc-macro2-0.4.30: MIT/Apache-2.0
-sgx_cov: see license file at sgx_cov/license_file
+sgx_cov: see license file at sgx_cov/LICENSE
 syn-0.15.44: MIT OR Apache-2.0
 globwalk: MIT
 getrandom: MIT OR Apache-2.0
@@ -100,16 +100,16 @@ quote-0.6.13: MIT OR Apache-2.0
 rand: MIT OR Apache-2.0
 prost-derive: Apache-2.0
 atty: MIT
-sgx_libc: see license file at sgx_libc/license_file
+sgx_libc: see license file at sgx_libc/LICENSE
 rustc_version: MIT/Apache-2.0
-webpki: see license file at webpki/license_file
+webpki: see license file at webpki/LICENSE
 wasm-bindgen-backend: MIT/Apache-2.0
 exitfailure: MIT OR Apache-2.0
 bstr: MIT OR Apache-2.0
-sgx_rand: see license file at sgx_rand/license_file
+sgx_rand: see license file at sgx_rand/LICENSE
 semver-parser: MIT/Apache-2.0
 byteorder: Unlicense OR MIT
-sgx_tstd: see license file at sgx_tstd/license_file
+sgx_tstd: see license file at sgx_tstd/LICENSE
 rand_os: MIT/Apache-2.0
 ppv-lite86: MIT/Apache-2.0
 rustls: Apache-2.0/ISC/MIT
@@ -137,7 +137,7 @@ either: MIT/Apache-2.0
 autocfg: Apache-2.0/MIT
 env_logger-0.5.13: MIT/Apache-2.0
 sct: Apache-2.0/ISC/MIT
-sgx_build_helper: see license file at sgx_build_helper/license_file
+sgx_build_helper: see license file at sgx_build_helper/LICENSE
 ansi_term: MIT
 crossbeam-deque: MIT/Apache-2.0
 clap-log-flag: MIT OR Apache-2.0
@@ -149,7 +149,7 @@ version_check: MIT/Apache-2.0
 winapi: MIT/Apache-2.0
 regex: MIT/Apache-2.0
 rustc-demangle: MIT/Apache-2.0
-sgx_tse: see license file at sgx_tse/license_file
+sgx_tse: see license file at sgx_tse/LICENSE
 structopt: Apache-2.0/MIT
 itoa: MIT/Apache-2.0
 clap-permission-flag: MIT OR Apache-2.0
@@ -157,7 +157,7 @@ net2: MIT/Apache-2.0
 serde_json: MIT OR Apache-2.0
 bumpalo: MIT/Apache-2.0
 nan-preserving-float: Unlicense
-sgx_backtrace_sys: see license file at sgx_backtrace_sys/license_file
+sgx_backtrace_sys: see license file at sgx_backtrace_sys/LICENSE
 c2-chacha: MIT/Apache-2.0
 anyhow: MIT OR Apache-2.0
 rayon-core: Apache-2.0/MIT
@@ -170,10 +170,10 @@ strsim: MIT
 crossbeam-epoch: MIT/Apache-2.0
 cmake: MIT/Apache-2.0
 iovec: MIT/Apache-2.0
-sgx_tprotected_fs: see license file at sgx_tprotected_fs/license_file
+sgx_tprotected_fs: see license file at sgx_tprotected_fs/LICENSE
 libc: MIT OR Apache-2.0
 rand_hc: MIT/Apache-2.0
-ring: see license file at ring/license_file
+ring: see license file at ring/LICENSE
 toml: MIT/Apache-2.0
 hermit-abi: MIT/Apache-2.0
 privdrop: ISC

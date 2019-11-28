@@ -10,8 +10,8 @@ for d in os.listdir("vendor"):
             content = f.read()
             r = re.search('license-file.*=.*"(.*)"', content)
             if r:
-                license_file = r.group()
-                print(d + ": " + "see license file at " + d + "/" + "license_file")
+                license_file = r.group(1)
+                print(d + ": " + "see license file at " + d + "/" + license_file)
             else:
                 pass
                 r = re.search('license.*=.*"(.*)"', content)

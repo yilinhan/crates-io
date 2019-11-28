@@ -1,5 +1,6 @@
 all:
 	@cargo-vendor vendor --relative-path > config
+	@./lic.py > licenses.txt
 	@grep -E "checksum.*crates" Cargo.lock | cut -d ' ' -f2,3 | column -t > README.txt
 test:
 	@cargo-vendor vendor > config

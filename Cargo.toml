@@ -42,8 +42,8 @@ webpki               = "0.21.0"
 webpki-roots         = "0.17.0"
 yasna                = "0.3.0"
 
-sgx_cov              = { git = "https://github.com/baidu/rust-sgx-sdk", rev = "v1.0.9" }
-sgx_tcrypto          = { git = "https://github.com/baidu/rust-sgx-sdk", rev = "v1.0.9" }
-sgx_tse              = { git = "https://github.com/baidu/rust-sgx-sdk", rev = "v1.0.9" }
-sgx_tstd             = { git = "https://github.com/baidu/rust-sgx-sdk", rev = "v1.0.9" }
-sgx_urts             = { git = "https://github.com/baidu/rust-sgx-sdk", rev = "v1.0.9" }
+sgx_cov              = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.0" }
+sgx_tcrypto          = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.0" }
+sgx_tse              = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.0" }
+sgx_tstd             = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.0" }
+sgx_urts             = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.0" }

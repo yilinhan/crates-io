@@ -1,6 +1,6 @@
 aho-corasick                  0.7.6
 ansi_term                     0.11.0
-anyhow                        1.0.23
+anyhow                        1.0.25
 atty                          0.2.13
 autocfg                       0.1.7
 backtrace                     0.3.40
@@ -13,7 +13,7 @@ bumpalo                       2.6.0
 byteorder                     1.3.2
 bytes                         0.4.12
 c2-chacha                     0.2.3
-cc                            1.0.47
+cc                            1.0.48
 cfg-if                        0.1.10
 chrono                        0.4.10
 clap                          2.33.0
@@ -44,7 +44,7 @@ getrandom                     0.1.13
 globset                       0.4.4
 globwalk                      0.3.1
 heck                          0.3.1
-hermit-abi                    0.1.3
+hermit-abi                    0.1.5
 httparse                      1.3.4
 humantime                     1.3.0
 ignore                        0.4.10
@@ -54,7 +54,7 @@ itertools                     0.8.2
 itoa                          0.4.4
 js-sys                        0.3.32
 lazy_static                   1.4.0
-libc                          0.2.65
+libc                          0.2.66
 log                           0.4.8
 memchr                        2.2.1
 memoffset                     0.5.3
@@ -114,16 +114,16 @@ scopeguard                    1.0.0
 sct                           0.6.0
 semver                        0.9.0
 semver-parser                 0.7.0
-serde                         1.0.103
-serde_derive                  1.0.103
-serde_json                    1.0.42
+serde                         1.0.104
+serde_derive                  1.0.104
+serde_json                    1.0.44
 sourcefile                    0.1.4
 spin                          0.5.2
 strsim                        0.8.0
 structopt                     0.2.18
 structopt-derive              0.2.18
 syn                           0.15.44
-syn                           1.0.8
+syn                           1.0.11
 synstructure                  0.12.3
 tempfile                      3.1.0
 termcolor                     1.0.5
@@ -133,7 +133,7 @@ threadpool                    1.7.1
 time                          0.1.42
 toml                          0.5.5
 unicode-segmentation          1.6.0
-unicode-width                 0.1.6
+unicode-width                 0.1.7
 unicode-xid                   0.1.0
 unicode-xid                   0.2.0
 untrusted                     0.7.0

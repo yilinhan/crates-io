@@ -35,6 +35,9 @@ const PROBE: &str = r#"
 "#;
 
 fn main() {
+    if !cfg!(feature = "std") {
+        return;
+    }
     match compile_probe() {
         Some(status) if status.success() => println!("cargo:rustc-cfg=backtrace"),
         _ => {}
@@ -44,7 +47,7 @@ fn main() {
 fn compile_probe() -> Option<ExitStatus> {
     let rustc = env::var_os("RUSTC")?;
     let out_dir = env::var_os("OUT_DIR")?;
-    let probefile = Path::new(&out_dir).join("lib.rs");
+    let probefile = Path::new(&out_dir).join("probe.rs");
     fs::write(&probefile, PROBE).ok()?;
     Command::new(rustc)
         .arg("--edition=2018")

@@ -12,7 +12,7 @@
 
 [package]
 name = "serde_json"
-version = "1.0.42"
+version = "1.0.44"
 authors = ["Erick Tryzelaar <erick.tryzelaar@gmail.com>", "David Tolnay <dtolnay@gmail.com>"]
 include = ["Cargo.toml", "src/**/*.rs", "README.md", "LICENSE-APACHE", "LICENSE-MIT"]
 description = "A JSON serialization file format"
@@ -28,7 +28,7 @@ features = ["raw_value", "unbounded_depth"]
 [package.metadata.playground]
 features = ["raw_value"]
 [dependencies.indexmap]
-version = "1.0"
+version = "1.2"
 optional = true
 
 [dependencies.itoa]

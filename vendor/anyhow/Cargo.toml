@@ -13,7 +13,7 @@
 [package]
 edition = "2018"
 name = "anyhow"
-version = "1.0.23"
+version = "1.0.25"
 authors = ["David Tolnay <dtolnay@gmail.com>"]
 description = "A better Box<dyn Error>"
 documentation = "https://docs.rs/anyhow"

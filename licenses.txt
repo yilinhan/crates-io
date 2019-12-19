@@ -128,6 +128,7 @@ sgx_rand: see license file at sgx_rand/LICENSE
 sgx_tcrypto: see license file at sgx_tcrypto/LICENSE
 sgx_tprotected_fs: see license file at sgx_tprotected_fs/LICENSE
 sgx_trts: see license file at sgx_trts/LICENSE
+sgx_tseal: see license file at sgx_tseal/LICENSE
 sgx_tse: see license file at sgx_tse/LICENSE
 sgx_tstd: see license file at sgx_tstd/LICENSE
 sgx_types: see license file at sgx_types/LICENSE

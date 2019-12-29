@@ -145,6 +145,8 @@ synstructure: MIT
 tempfile: MIT OR Apache-2.0
 termcolor: Unlicense OR MIT
 textwrap: MIT
+thiserror-impl: MIT OR Apache-2.0
+thiserror: MIT OR Apache-2.0
 thread_local: Apache-2.0/MIT
 threadpool: MIT/Apache-2.0
 time: MIT/Apache-2.0

@@ -1,6 +1,6 @@
 aho-corasick                  0.7.6
 ansi_term                     0.11.0
-anyhow                        1.0.25
+anyhow                        1.0.26
 atty                          0.2.13
 autocfg                       0.1.7
 backtrace                     0.3.40
@@ -128,6 +128,8 @@ synstructure                  0.12.3
 tempfile                      3.1.0
 termcolor                     1.0.5
 textwrap                      0.11.0
+thiserror                     1.0.9
+thiserror-impl                1.0.9
 thread_local                  0.3.6
 threadpool                    1.7.1
 time                          0.1.42

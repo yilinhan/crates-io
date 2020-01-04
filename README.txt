@@ -45,6 +45,7 @@ globset                       0.4.4
 globwalk                      0.3.1
 heck                          0.3.1
 hermit-abi                    0.1.5
+hex                           0.4.0
 httparse                      1.3.4
 humantime                     1.3.0
 ignore                        0.4.10

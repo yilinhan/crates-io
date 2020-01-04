@@ -45,6 +45,7 @@ globset: Unlicense/MIT
 globwalk: MIT
 heck: MIT OR Apache-2.0
 hermit-abi: MIT/Apache-2.0
+hex: MIT OR Apache-2.0
 httparse: MIT/Apache-2.0
 humantime: MIT/Apache-2.0
 ignore: Unlicense/MIT

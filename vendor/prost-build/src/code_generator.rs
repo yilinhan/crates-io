@@ -277,18 +277,13 @@ impl<'a> CodeGenerator<'a> {
     }
 
     fn append_field(&mut self, msg_name: &str, field: FieldDescriptorProto) {
-        // TODO(danburkert/prost#19): support groups.
         let type_ = field.r#type();
-        if type_ == Type::Group {
-            return;
-        }
-
         let repeated = field.label == Some(Label::Repeated as i32);
         let optional = self.optional(&field);
         let ty = self.resolve_type(&field);
 
         let boxed = !repeated
-            && type_ == Type::Message
+            && (type_ == Type::Message || type_ == Type::Group)
             && self.message_graph.is_nested(field.type_name(), msg_name);
 
         debug!(
@@ -496,11 +491,7 @@ impl<'a> CodeGenerator<'a> {
         self.path.push(2);
         self.depth += 1;
         for (field, idx) in fields {
-            // TODO(danburkert/prost#19): support groups.
             let type_ = field.r#type();
-            if type_ == Type::Group {
-                continue;
-            }
 
             self.path.push(idx as i32);
             self.append_doc();
@@ -518,8 +509,8 @@ impl<'a> CodeGenerator<'a> {
             self.push_indent();
             let ty = self.resolve_type(&field);
 
-            let boxed =
-                type_ == Type::Message && self.message_graph.is_nested(field.type_name(), msg_name);
+            let boxed = (type_ == Type::Message || type_ == Type::Group)
+                && self.message_graph.is_nested(field.type_name(), msg_name);
 
             debug!(
                 "    oneof: {:?}, type: {:?}, boxed: {}",

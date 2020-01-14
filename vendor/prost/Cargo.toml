@@ -3,7 +3,7 @@
 # When uploading crates to the registry Cargo will automatically
 # "normalize" Cargo.toml files for maximal compatibility
 # with all versions of Cargo and also rewrite `path` dependencies
-# to registry (e.g. crates.io) dependencies
+# to registry (e.g., crates.io) dependencies
 #
 # If you believe there's an error in this file please file an
 # issue against the rust-lang/cargo repository. If you're
@@ -13,7 +13,7 @@
 [package]
 edition = "2018"
 name = "prost"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["Dan Burkert <dan@danburkert.com>"]
 description = "A Protocol Buffers implementation for the Rust Language."
 documentation = "https://docs.rs/prost"
@@ -22,43 +22,40 @@ keywords = ["protobuf", "serialization"]
 categories = ["encoding"]
 license = "Apache-2.0"
 repository = "https://github.com/danburkert/prost"
+[profile.bench]
+debug = true
+
+[lib]
+bench = false
 
 [[bench]]
 name = "varint"
-
-[[bench]]
-name = "benchmark"
 harness = false
-[dependencies.byteorder]
-version = "1"
-
 [dependencies.bytes]
-version = "0.4.7"
+version = "0.5"
 
 [dependencies.prost-derive]
-version = "0.5.0"
+version = "0.6.0"
 optional = true
 [dev-dependencies.criterion]
-version = "0.2"
+version = "0.3"
 
 [dev-dependencies.env_logger]
-version = "0.6"
+version = "0.7"
 default-features = false
-
-[dev-dependencies.failure]
-version = "0.1"
 
 [dev-dependencies.log]
 version = "0.4"
 
-[dev-dependencies.protobuf]
-version = "0"
-
 [dev-dependencies.quickcheck]
-version = "0.8"
+version = "0.9"
+
+[dev-dependencies.rand]
+version = "0.7"
 
 [features]
 default = ["prost-derive"]
+no-recursion-limit = []
 [badges.appveyor]
 repository = "danburkert/prost"
 

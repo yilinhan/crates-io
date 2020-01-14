@@ -11,6 +11,7 @@ bit-vec: MIT/Apache-2.0
 bstr: MIT OR Apache-2.0
 bumpalo: MIT/Apache-2.0
 byteorder: Unlicense OR MIT
+bytes-0.4.12: MIT
 bytes: MIT
 c2-chacha: MIT/Apache-2.0
 cc: MIT/Apache-2.0
@@ -48,6 +49,7 @@ hermit-abi: MIT/Apache-2.0
 hex: MIT OR Apache-2.0
 httparse: MIT/Apache-2.0
 humantime: MIT/Apache-2.0
+idna: MIT/Apache-2.0
 ignore: Unlicense/MIT
 indexmap: Apache-2.0/MIT
 iovec: MIT/Apache-2.0
@@ -57,6 +59,7 @@ js-sys: MIT/Apache-2.0
 lazy_static: MIT/Apache-2.0
 libc: MIT OR Apache-2.0
 log: MIT OR Apache-2.0
+matches: MIT
 memchr: Unlicense/MIT
 memoffset: MIT
 multimap: MIT/Apache-2.0
@@ -69,6 +72,7 @@ num-bigint: MIT/Apache-2.0
 num_cpus: MIT/Apache-2.0
 num-integer: MIT/Apache-2.0
 num-traits: MIT/Apache-2.0
+percent-encoding: MIT/Apache-2.0
 petgraph: MIT/Apache-2.0
 ppv-lite86: MIT/Apache-2.0
 pretty_env_logger: MIT/Apache-2.0
@@ -135,6 +139,7 @@ sgx_tstd: see license file at sgx_tstd/LICENSE
 sgx_types: see license file at sgx_types/LICENSE
 sgx_unwind: see license file at sgx_unwind/LICENSE
 sgx_urts: see license file at sgx_urts/LICENSE
+smallvec: MIT/Apache-2.0
 sourcefile: Apache-2.0/MIT
 spin: MIT
 strsim: MIT
@@ -152,11 +157,14 @@ thread_local: Apache-2.0/MIT
 threadpool: MIT/Apache-2.0
 time: MIT/Apache-2.0
 toml: MIT/Apache-2.0
+unicode-bidi: MIT / Apache-2.0
+unicode-normalization: MIT/Apache-2.0
 unicode-segmentation: MIT/Apache-2.0
 unicode-width: MIT/Apache-2.0
 unicode-xid-0.1.0: MIT/Apache-2.0
 unicode-xid: MIT OR Apache-2.0
 untrusted: ISC
+url: MIT/Apache-2.0
 uuid: Apache-2.0 OR MIT
 vec_map: MIT/Apache-2.0
 version_check: MIT/Apache-2.0

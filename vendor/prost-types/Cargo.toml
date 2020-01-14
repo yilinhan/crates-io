@@ -3,7 +3,7 @@
 # When uploading crates to the registry Cargo will automatically
 # "normalize" Cargo.toml files for maximal compatibility
 # with all versions of Cargo and also rewrite `path` dependencies
-# to registry (e.g. crates.io) dependencies
+# to registry (e.g., crates.io) dependencies
 #
 # If you believe there's an error in this file please file an
 # issue against the rust-lang/cargo repository. If you're
@@ -13,7 +13,7 @@
 [package]
 edition = "2018"
 name = "prost-types"
-version = "0.5.0"
+version = "0.6.0"
 authors = ["Dan Burkert <dan@danburkert.com>"]
 description = "A Protocol Buffers implementation for the Rust Language."
 documentation = "https://docs.rs/prost-types"
@@ -25,7 +25,7 @@ repository = "https://github.com/danburkert/prost"
 test = false
 doctest = false
 [dependencies.bytes]
-version = "0.4.7"
+version = "0.5"
 
 [dependencies.prost]
-version = "0.5.0"
+version = "0.6.0"

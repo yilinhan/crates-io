@@ -4,7 +4,6 @@
 //! The only difference from the original is that calls to `recurse` are executed in parallel using
 //! `rayon_core::join`.
 
-use rayon_core;
 use std::cmp;
 use std::mem;
 use std::ptr;
@@ -767,7 +766,7 @@ mod tests {
 
     #[test]
     fn test_heapsort() {
-        let mut rng = thread_rng();
+        let rng = thread_rng();
 
         for len in (0..25).chain(500..501) {
             for &modulus in &[5, 10, 100] {

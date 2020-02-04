@@ -12,7 +12,7 @@
 
 [package]
 name = "crossbeam-channel"
-version = "0.3.9"
+version = "0.4.0"
 authors = ["The Crossbeam Project Developers"]
 description = "Multi-producer multi-consumer channels for message passing"
 homepage = "https://github.com/crossbeam-rs/crossbeam/tree/master/crossbeam-channel"
@@ -23,7 +23,7 @@ categories = ["algorithms", "concurrency", "data-structures"]
 license = "MIT/Apache-2.0 AND BSD-2-Clause"
 repository = "https://github.com/crossbeam-rs/crossbeam"
 [dependencies.crossbeam-utils]
-version = "0.6.5"
+version = "0.7"
 [dev-dependencies.num_cpus]
 version = "1.10.0"
 

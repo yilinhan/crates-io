@@ -13,7 +13,7 @@
 [package]
 edition = "2018"
 name = "web-sys"
-version = "0.3.32"
+version = "0.3.35"
 authors = ["The wasm-bindgen Developers"]
 description = "Bindings for all Web APIs, a procedurally generated crate from WebIDL\n"
 homepage = "https://rustwasm.github.io/wasm-bindgen/web-sys/index.html"
@@ -28,10 +28,10 @@ all-features = true
 test = false
 doctest = false
 [dependencies.js-sys]
-version = "0.3.32"
+version = "0.3.35"
 
 [dependencies.wasm-bindgen]
-version = "0.2.55"
+version = "0.2.58"
 [build-dependencies.anyhow]
 version = "1.0"
 
@@ -43,7 +43,7 @@ optional = true
 version = "0.1"
 
 [build-dependencies.wasm-bindgen-webidl]
-version = "=0.2.55"
+version = "=0.2.58"
 
 [features]
 AbortController = []
@@ -1292,7 +1292,7 @@ XsltProcessor = []
 console = []
 css = []
 [target."cfg(target_arch = \"wasm32\")".dev-dependencies.wasm-bindgen-futures]
-version = "0.4.5"
+version = "0.4.8"
 
 [target."cfg(target_arch = \"wasm32\")".dev-dependencies.wasm-bindgen-test]
-version = "0.3.5"
+version = "0.3.8"

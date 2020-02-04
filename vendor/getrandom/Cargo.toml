@@ -13,7 +13,7 @@
 [package]
 edition = "2018"
 name = "getrandom"
-version = "0.1.13"
+version = "0.1.14"
 authors = ["The Rand Project Developers"]
 exclude = ["utils/*", ".*", "appveyor.yml"]
 description = "A small cross-platform library for retrieving random data from system source"
@@ -43,7 +43,7 @@ rustc-dep-of-std = ["compiler_builtins", "core"]
 std = []
 test-in-browser = ["wasm-bindgen"]
 [target."cfg(target_os = \"wasi\")".dependencies.wasi]
-version = "0.7"
+version = "0.9"
 [target."cfg(unix)".dependencies.libc]
 version = "0.2.64"
 default-features = false

@@ -20,17 +20,20 @@ provides its own implementation of `memrchr` as well, on top of `memchr2`,
 instead of one. Similarly for `memchr3`.
 */
 
-#![cfg_attr(not(feature = "use_std"), no_std)]
-
+#![cfg_attr(not(feature = "std"), no_std)]
 #![deny(missing_docs)]
 #![doc(html_root_url = "https://docs.rs/memchr/2.0.0")]
 
-// Supporting 16-bit would be fine. If you need it, please submit a bug report
-// at https://github.com/BurntSushi/rust-memchr
-#[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
+// Supporting 8-bit (or others) would be fine. If you need it, please submit a
+// bug report at https://github.com/BurntSushi/rust-memchr
+#[cfg(not(any(
+    target_pointer_width = "16",
+    target_pointer_width = "32",
+    target_pointer_width = "64"
+)))]
 compile_error!("memchr currently not supported on non-32 or non-64 bit");
 
-#[cfg(feature = "use_std")]
+#[cfg(feature = "std")]
 extern crate core;
 
 #[cfg(test)]
@@ -48,10 +51,10 @@ mod c;
 mod fallback;
 mod iter;
 mod naive;
-#[cfg(all(target_arch = "x86_64", memchr_runtime_simd))]
-mod x86;
 #[cfg(test)]
 mod tests;
+#[cfg(all(target_arch = "x86_64", memchr_runtime_simd))]
+mod x86;
 
 /// An iterator over all occurrences of the needle in a haystack.
 #[inline]
@@ -61,11 +64,7 @@ pub fn memchr_iter(needle: u8, haystack: &[u8]) -> Memchr {
 
 /// An iterator over all occurrences of the needles in a haystack.
 #[inline]
-pub fn memchr2_iter(
-    needle1: u8,
-    needle2: u8,
-    haystack: &[u8],
-) -> Memchr2 {
+pub fn memchr2_iter(needle1: u8, needle2: u8, haystack: &[u8]) -> Memchr2 {
     Memchr2::new(needle1, needle2, haystack)
 }
 
@@ -160,7 +159,28 @@ pub fn memchr(needle: u8, haystack: &[u8]) -> Option<usize> {
     }
 }
 
-/// Like `memchr`, but searches for two bytes instead of one.
+/// Like `memchr`, but searches for either of two bytes instead of just one.
+///
+/// This returns the index corresponding to the first occurrence of `needle1`
+/// or the first occurrence of `needle2` in `haystack` (whichever occurs
+/// earlier), or `None` if neither one is found.
+///
+/// While this is operationally the same as something like
+/// `haystack.iter().position(|&b| b == needle1 || b == needle2)`, `memchr2`
+/// will use a highly optimized routine that can be up to an order of magnitude
+/// faster in some cases.
+///
+/// # Example
+///
+/// This shows how to find the first position of either of two bytes in a byte
+/// string.
+///
+/// ```
+/// use memchr::memchr2;
+///
+/// let haystack = b"the quick brown fox";
+/// assert_eq!(memchr2(b'k', b'q', haystack), Some(4));
+/// ```
 #[inline]
 pub fn memchr2(needle1: u8, needle2: u8, haystack: &[u8]) -> Option<usize> {
     #[cfg(all(target_arch = "x86_64", memchr_runtime_simd))]
@@ -182,7 +202,28 @@ pub fn memchr2(needle1: u8, needle2: u8, haystack: &[u8]) -> Option<usize> {
     }
 }
 
-/// Like `memchr`, but searches for three bytes instead of one.
+/// Like `memchr`, but searches for any of three bytes instead of just one.
+///
+/// This returns the index corresponding to the first occurrence of `needle1`,
+/// the first occurrence of `needle2`, or the first occurence of `needle3` in
+/// `haystack` (whichever occurs earliest), or `None` if none are found.
+///
+/// While this is operationally the same as something like
+/// `haystack.iter().position(|&b| b == needle1 || b == needle2 ||
+/// b == needle3)`, `memchr3` will use a highly optimized routine that can be
+/// up to an order of magnitude faster in some cases.
+///
+/// # Example
+///
+/// This shows how to find the first position of any of three bytes in a byte
+/// string.
+///
+/// ```
+/// use memchr::memchr3;
+///
+/// let haystack = b"the quick brown fox";
+/// assert_eq!(memchr3(b'k', b'q', b'e', haystack), Some(2));
+/// ```
 #[inline]
 pub fn memchr3(
     needle1: u8,
@@ -262,7 +303,28 @@ pub fn memrchr(needle: u8, haystack: &[u8]) -> Option<usize> {
     }
 }
 
-/// Like `memrchr`, but searches for two bytes instead of one.
+/// Like `memrchr`, but searches for either of two bytes instead of just one.
+///
+/// This returns the index corresponding to the last occurrence of `needle1`
+/// or the last occurrence of `needle2` in `haystack` (whichever occurs later),
+/// or `None` if neither one is found.
+///
+/// While this is operationally the same as something like
+/// `haystack.iter().rposition(|&b| b == needle1 || b == needle2)`, `memrchr2`
+/// will use a highly optimized routine that can be up to an order of magnitude
+/// faster in some cases.
+///
+/// # Example
+///
+/// This shows how to find the last position of either of two bytes in a byte
+/// string.
+///
+/// ```
+/// use memchr::memrchr2;
+///
+/// let haystack = b"the quick brown fox";
+/// assert_eq!(memrchr2(b'k', b'q', haystack), Some(8));
+/// ```
 #[inline]
 pub fn memrchr2(needle1: u8, needle2: u8, haystack: &[u8]) -> Option<usize> {
     #[cfg(all(target_arch = "x86_64", memchr_runtime_simd))]
@@ -284,7 +346,28 @@ pub fn memrchr2(needle1: u8, needle2: u8, haystack: &[u8]) -> Option<usize> {
     }
 }
 
-/// Like `memrchr`, but searches for three bytes instead of one.
+/// Like `memrchr`, but searches for any of three bytes instead of just one.
+///
+/// This returns the index corresponding to the last occurrence of `needle1`,
+/// the last occurrence of `needle2`, or the last occurence of `needle3` in
+/// `haystack` (whichever occurs later), or `None` if none are found.
+///
+/// While this is operationally the same as something like
+/// `haystack.iter().rposition(|&b| b == needle1 || b == needle2 ||
+/// b == needle3)`, `memrchr3` will use a highly optimized routine that can be
+/// up to an order of magnitude faster in some cases.
+///
+/// # Example
+///
+/// This shows how to find the last position of any of three bytes in a byte
+/// string.
+///
+/// ```
+/// use memchr::memrchr3;
+///
+/// let haystack = b"the quick brown fox";
+/// assert_eq!(memrchr3(b'k', b'q', b'e', haystack), Some(8));
+/// ```
 #[inline]
 pub fn memrchr3(
     needle1: u8,

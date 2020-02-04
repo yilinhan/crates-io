@@ -13,11 +13,11 @@
 //!
 //! ```
 
+#[cfg(feature = "failure")]
 extern crate failure;
 extern crate libc;
-#[cfg(test)]
-extern crate tempdir;
 
+#[cfg(feature = "failure")]
 use failure::ResultExt;
 mod checker;
 mod error;
@@ -26,12 +26,8 @@ mod finder;
 mod helper;
 
 use std::env;
-use std::path::{Path, PathBuf};
-
-// Remove the `AsciiExt` will make `which-rs` build failed in older versions of Rust.
-// Please Keep it here though we don't need it in the new Rust version(>=1.23).
-#[allow(unused_imports)]
-use std::ascii::AsciiExt;
+use std::fmt;
+use std::path;
 
 use std::ffi::OsStr;
 
@@ -62,17 +58,21 @@ use finder::Finder;
 /// assert_eq!(result, PathBuf::from("/usr/bin/rustc"));
 ///
 /// ```
-pub fn which<T: AsRef<OsStr>>(binary_name: T) -> Result<PathBuf> {
+pub fn which<T: AsRef<OsStr>>(binary_name: T) -> Result<path::PathBuf> {
+    #[cfg(feature = "failure")]
     let cwd = env::current_dir().context(ErrorKind::CannotGetCurrentDir)?;
+    #[cfg(not(feature = "failure"))]
+    let cwd = env::current_dir().map_err(|_| ErrorKind::CannotGetCurrentDir)?;
+
     which_in(binary_name, env::var_os("PATH"), &cwd)
 }
 
 /// Find `binary_name` in the path list `paths`, using `cwd` to resolve relative paths.
-pub fn which_in<T, U, V>(binary_name: T, paths: Option<U>, cwd: V) -> Result<PathBuf>
+pub fn which_in<T, U, V>(binary_name: T, paths: Option<U>, cwd: V) -> Result<path::PathBuf>
 where
     T: AsRef<OsStr>,
     U: AsRef<OsStr>,
-    V: AsRef<Path>,
+    V: AsRef<path::Path>,
 {
     let binary_checker = CompositeChecker::new()
         .add_checker(Box::new(ExistedChecker::new()))
@@ -83,336 +83,189 @@ where
     finder.find(binary_name, paths, cwd, &binary_checker)
 }
 
-#[cfg(test)]
-mod test {
-    use super::*;
+/// An owned, immutable wrapper around a `PathBuf` containing the path of an executable.
+///
+/// The constructed `PathBuf` is the output of `which` or `which_in`, but `which::Path` has the
+/// advantage of being a type distinct from `std::path::Path` and `std::path::PathBuf`.
+///
+/// It can be beneficial to use `which::Path` instead of `std::path::Path` when you want the type
+/// system to enforce the need for a path that exists and points to a binary that is executable.
+///
+/// Since `which::Path` implements `Deref` for `std::path::Path`, all methods on `&std::path::Path`
+/// are also available to `&which::Path` values.
+#[derive(Clone, PartialEq)]
+pub struct Path {
+    inner: path::PathBuf,
+}
 
-    use std::env;
-    use std::ffi::{OsStr, OsString};
-    use std::fs;
-    use std::io;
-    use std::path::{Path, PathBuf};
-    use tempdir::TempDir;
-
-    struct TestFixture {
-        /// Temp directory.
-        pub tempdir: TempDir,
-        /// $PATH
-        pub paths: OsString,
-        /// Binaries created in $PATH
-        pub bins: Vec<PathBuf>,
+impl Path {
+    /// Returns the path of an executable binary by name.
+    ///
+    /// This calls `which` and maps the result into a `Path`.
+    pub fn new<T: AsRef<OsStr>>(binary_name: T) -> Result<Path> {
+        which(binary_name).map(|inner| Path { inner })
     }
 
-    const SUBDIRS: &'static [&'static str] = &["a", "b", "c"];
-    const BIN_NAME: &'static str = "bin";
-
-    #[cfg(unix)]
-    fn mk_bin(dir: &Path, path: &str, extension: &str) -> io::Result<PathBuf> {
-        use libc;
-        use std::os::unix::fs::OpenOptionsExt;
-        let bin = dir.join(path).with_extension(extension);
-        fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .mode(0o666 | (libc::S_IXUSR as u32))
-            .open(&bin)
-            .and_then(|_f| bin.canonicalize())
+    /// Returns the path of an executable binary by name in the path list `paths` and using the
+    /// current working directory `cwd` to resolve relative paths.
+    ///
+    /// This calls `which_in` and maps the result into a `Path`.
+    pub fn new_in<T, U, V>(binary_name: T, paths: Option<U>, cwd: V) -> Result<Path>
+    where
+        T: AsRef<OsStr>,
+        U: AsRef<OsStr>,
+        V: AsRef<path::Path>,
+    {
+        which_in(binary_name, paths, cwd).map(|inner| Path { inner })
     }
 
-    fn touch(dir: &Path, path: &str, extension: &str) -> io::Result<PathBuf> {
-        let b = dir.join(path).with_extension(extension);
-        fs::File::create(&b).and_then(|_f| b.canonicalize())
+    /// Returns a reference to a `std::path::Path`.
+    pub fn as_path(&self) -> &path::Path {
+        self.inner.as_path()
     }
 
-    #[cfg(windows)]
-    fn mk_bin(dir: &Path, path: &str, extension: &str) -> io::Result<PathBuf> {
-        touch(dir, path, extension)
+    /// Consumes the `which::Path`, yielding its underlying `std::path::PathBuf`.
+    pub fn into_path_buf(self) -> path::PathBuf {
+        self.inner
+    }
+}
+
+impl fmt::Debug for Path {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Debug::fmt(&self.inner, f)
+    }
+}
+
+impl std::ops::Deref for Path {
+    type Target = path::Path;
+
+    fn deref(&self) -> &path::Path {
+        self.inner.deref()
+    }
+}
+
+impl AsRef<path::Path> for Path {
+    fn as_ref(&self) -> &path::Path {
+        self.as_path()
+    }
+}
+
+impl AsRef<OsStr> for Path {
+    fn as_ref(&self) -> &OsStr {
+        self.as_os_str()
+    }
+}
+
+impl Eq for Path {}
+
+impl PartialEq<path::PathBuf> for Path {
+    fn eq(&self, other: &path::PathBuf) -> bool {
+        self.inner == *other
+    }
+}
+
+impl PartialEq<Path> for path::PathBuf {
+    fn eq(&self, other: &Path) -> bool {
+        *self == other.inner
+    }
+}
+
+/// An owned, immutable wrapper around a `PathBuf` containing the _canonical_ path of an
+/// executable.
+///
+/// The constructed `PathBuf` is the result of `which` or `which_in` followed by
+/// `Path::canonicalize`, but `CanonicalPath` has the advantage of being a type distinct from
+/// `std::path::Path` and `std::path::PathBuf`.
+///
+/// It can be beneficial to use `CanonicalPath` instead of `std::path::Path` when you want the type
+/// system to enforce the need for a path that exists, points to a binary that is executable, is
+/// absolute, has all components normalized, and has all symbolic links resolved
+///
+/// Since `CanonicalPath` implements `Deref` for `std::path::Path`, all methods on
+/// `&std::path::Path` are also available to `&CanonicalPath` values.
+#[derive(Clone, PartialEq)]
+pub struct CanonicalPath {
+    inner: path::PathBuf,
+}
+
+impl CanonicalPath {
+    /// Returns the canonical path of an executable binary by name.
+    ///
+    /// This calls `which` and `Path::canonicalize` and maps the result into a `CanonicalPath`.
+    pub fn new<T: AsRef<OsStr>>(binary_name: T) -> Result<CanonicalPath> {
+        which(binary_name)
+            .and_then(|p| {
+                p.canonicalize()
+                    .map_err(|_| ErrorKind::CannotCanonicalize.into())
+            })
+            .map(|inner| CanonicalPath { inner })
     }
 
-    impl TestFixture {
-        // tmp/a/bin
-        // tmp/a/bin.exe
-        // tmp/a/bin.cmd
-        // tmp/b/bin
-        // tmp/b/bin.exe
-        // tmp/b/bin.cmd
-        // tmp/c/bin
-        // tmp/c/bin.exe
-        // tmp/c/bin.cmd
-        pub fn new() -> TestFixture {
-            let tempdir = TempDir::new("which_tests").unwrap();
-            let mut builder = fs::DirBuilder::new();
-            builder.recursive(true);
-            let mut paths = vec![];
-            let mut bins = vec![];
-            for d in SUBDIRS.iter() {
-                let p = tempdir.path().join(d);
-                builder.create(&p).unwrap();
-                bins.push(mk_bin(&p, &BIN_NAME, "").unwrap());
-                bins.push(mk_bin(&p, &BIN_NAME, "exe").unwrap());
-                bins.push(mk_bin(&p, &BIN_NAME, "cmd").unwrap());
-                paths.push(p);
-            }
-            TestFixture {
-                tempdir: tempdir,
-                paths: env::join_paths(paths).unwrap(),
-                bins: bins,
-            }
-        }
-
-        #[allow(dead_code)]
-        pub fn touch(&self, path: &str, extension: &str) -> io::Result<PathBuf> {
-            touch(self.tempdir.path(), &path, &extension)
-        }
-
-        pub fn mk_bin(&self, path: &str, extension: &str) -> io::Result<PathBuf> {
-            mk_bin(self.tempdir.path(), &path, &extension)
-        }
+    /// Returns the canonical path of an executable binary by name in the path list `paths` and
+    /// using the current working directory `cwd` to resolve relative paths.
+    ///
+    /// This calls `which` and `Path::canonicalize` and maps the result into a `CanonicalPath`.
+    pub fn new_in<T, U, V>(binary_name: T, paths: Option<U>, cwd: V) -> Result<CanonicalPath>
+    where
+        T: AsRef<OsStr>,
+        U: AsRef<OsStr>,
+        V: AsRef<path::Path>,
+    {
+        which_in(binary_name, paths, cwd)
+            .and_then(|p| {
+                p.canonicalize()
+                    .map_err(|_| ErrorKind::CannotCanonicalize.into())
+            })
+            .map(|inner| CanonicalPath { inner })
     }
 
-    fn _which<T: AsRef<OsStr>>(f: &TestFixture, path: T) -> Result<PathBuf> {
-        which_in(path, Some(f.paths.clone()), f.tempdir.path())
+    /// Returns a reference to a `std::path::Path`.
+    pub fn as_path(&self) -> &path::Path {
+        self.inner.as_path()
     }
 
-    #[test]
-    #[cfg(unix)]
-    fn it_works() {
-        use std::process::Command;
-        let result = which("rustc");
-        assert!(result.is_ok());
-
-        let which_result = Command::new("which").arg("rustc").output();
-
-        assert_eq!(
-            String::from(result.unwrap().to_str().unwrap()),
-            String::from_utf8(which_result.unwrap().stdout)
-                .unwrap()
-                .trim()
-        );
+    /// Consumes the `which::CanonicalPath`, yielding its underlying `std::path::PathBuf`.
+    pub fn into_path_buf(self) -> path::PathBuf {
+        self.inner
     }
+}
 
-    #[test]
-    #[cfg(unix)]
-    fn test_which() {
-        let f = TestFixture::new();
-        assert_eq!(
-            _which(&f, &BIN_NAME).unwrap().canonicalize().unwrap(),
-            f.bins[0]
-        )
+impl fmt::Debug for CanonicalPath {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        fmt::Debug::fmt(&self.inner, f)
     }
+}
 
-    #[test]
-    #[cfg(windows)]
-    fn test_which() {
-        let f = TestFixture::new();
-        assert_eq!(
-            _which(&f, &BIN_NAME).unwrap().canonicalize().unwrap(),
-            f.bins[1]
-        )
+impl std::ops::Deref for CanonicalPath {
+    type Target = path::Path;
+
+    fn deref(&self) -> &path::Path {
+        self.inner.deref()
     }
+}
 
-    #[test]
-    #[cfg(unix)]
-    fn test_which_extension() {
-        let f = TestFixture::new();
-        let b = Path::new(&BIN_NAME).with_extension("");
-        assert_eq!(_which(&f, &b).unwrap().canonicalize().unwrap(), f.bins[0])
+impl AsRef<path::Path> for CanonicalPath {
+    fn as_ref(&self) -> &path::Path {
+        self.as_path()
     }
+}
 
-    #[test]
-    #[cfg(windows)]
-    fn test_which_extension() {
-        let f = TestFixture::new();
-        let b = Path::new(&BIN_NAME).with_extension("cmd");
-        assert_eq!(_which(&f, &b).unwrap().canonicalize().unwrap(), f.bins[2])
+impl AsRef<OsStr> for CanonicalPath {
+    fn as_ref(&self) -> &OsStr {
+        self.as_os_str()
     }
+}
 
-    #[test]
-    fn test_which_not_found() {
-        let f = TestFixture::new();
-        assert!(_which(&f, "a").is_err());
+impl Eq for CanonicalPath {}
+
+impl PartialEq<path::PathBuf> for CanonicalPath {
+    fn eq(&self, other: &path::PathBuf) -> bool {
+        self.inner == *other
     }
+}
 
-    #[test]
-    fn test_which_second() {
-        let f = TestFixture::new();
-        let b = f.mk_bin("b/another", env::consts::EXE_EXTENSION).unwrap();
-        assert_eq!(_which(&f, "another").unwrap().canonicalize().unwrap(), b);
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn test_which_absolute() {
-        let f = TestFixture::new();
-        assert_eq!(
-            _which(&f, &f.bins[3]).unwrap().canonicalize().unwrap(),
-            f.bins[3].canonicalize().unwrap()
-        );
-    }
-
-    #[test]
-    #[cfg(windows)]
-    fn test_which_absolute() {
-        let f = TestFixture::new();
-        assert_eq!(
-            _which(&f, &f.bins[4]).unwrap().canonicalize().unwrap(),
-            f.bins[4].canonicalize().unwrap()
-        );
-    }
-
-    #[test]
-    #[cfg(windows)]
-    fn test_which_absolute_path_case() {
-        // Test that an absolute path with an uppercase extension
-        // is accepted.
-        let f = TestFixture::new();
-        let p = &f.bins[4];
-        assert_eq!(
-            _which(&f, &p).unwrap().canonicalize().unwrap(),
-            f.bins[4].canonicalize().unwrap()
-        );
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn test_which_absolute_extension() {
-        let f = TestFixture::new();
-        // Don't append EXE_EXTENSION here.
-        let b = f.bins[3].parent().unwrap().join(&BIN_NAME);
-        assert_eq!(
-            _which(&f, &b).unwrap().canonicalize().unwrap(),
-            f.bins[3].canonicalize().unwrap()
-        );
-    }
-
-    #[test]
-    #[cfg(windows)]
-    fn test_which_absolute_extension() {
-        let f = TestFixture::new();
-        // Don't append EXE_EXTENSION here.
-        let b = f.bins[4].parent().unwrap().join(&BIN_NAME);
-        assert_eq!(
-            _which(&f, &b).unwrap().canonicalize().unwrap(),
-            f.bins[4].canonicalize().unwrap()
-        );
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn test_which_relative() {
-        let f = TestFixture::new();
-        assert_eq!(
-            _which(&f, "b/bin").unwrap().canonicalize().unwrap(),
-            f.bins[3].canonicalize().unwrap()
-        );
-    }
-
-    #[test]
-    #[cfg(windows)]
-    fn test_which_relative() {
-        let f = TestFixture::new();
-        assert_eq!(
-            _which(&f, "b/bin").unwrap().canonicalize().unwrap(),
-            f.bins[4].canonicalize().unwrap()
-        );
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn test_which_relative_extension() {
-        // test_which_relative tests a relative path without an extension,
-        // so test a relative path with an extension here.
-        let f = TestFixture::new();
-        let b = Path::new("b/bin").with_extension(env::consts::EXE_EXTENSION);
-        assert_eq!(
-            _which(&f, &b).unwrap().canonicalize().unwrap(),
-            f.bins[3].canonicalize().unwrap()
-        );
-    }
-
-    #[test]
-    #[cfg(windows)]
-    fn test_which_relative_extension() {
-        // test_which_relative tests a relative path without an extension,
-        // so test a relative path with an extension here.
-        let f = TestFixture::new();
-        let b = Path::new("b/bin").with_extension("cmd");
-        assert_eq!(
-            _which(&f, &b).unwrap().canonicalize().unwrap(),
-            f.bins[5].canonicalize().unwrap()
-        );
-    }
-
-    #[test]
-    #[cfg(windows)]
-    fn test_which_relative_extension_case() {
-        // Test that a relative path with an uppercase extension
-        // is accepted.
-        let f = TestFixture::new();
-        let b = Path::new("b/bin").with_extension("EXE");
-        assert_eq!(
-            _which(&f, &b).unwrap().canonicalize().unwrap(),
-            f.bins[4].canonicalize().unwrap()
-        );
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn test_which_relative_leading_dot() {
-        let f = TestFixture::new();
-        assert_eq!(
-            _which(&f, "./b/bin").unwrap().canonicalize().unwrap(),
-            f.bins[3].canonicalize().unwrap()
-        );
-    }
-
-    #[test]
-    #[cfg(windows)]
-    fn test_which_relative_leading_dot() {
-        let f = TestFixture::new();
-        assert_eq!(
-            _which(&f, "./b/bin").unwrap().canonicalize().unwrap(),
-            f.bins[4].canonicalize().unwrap()
-        );
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn test_which_non_executable() {
-        // Shouldn't return non-executable files.
-        let f = TestFixture::new();
-        f.touch("b/another", "").unwrap();
-        assert!(_which(&f, "another").is_err());
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn test_which_absolute_non_executable() {
-        // Shouldn't return non-executable files, even if given an absolute path.
-        let f = TestFixture::new();
-        let b = f.touch("b/another", "").unwrap();
-        assert!(_which(&f, &b).is_err());
-    }
-
-    #[test]
-    #[cfg(unix)]
-    fn test_which_relative_non_executable() {
-        // Shouldn't return non-executable files.
-        let f = TestFixture::new();
-        f.touch("b/another", "").unwrap();
-        assert!(_which(&f, "b/another").is_err());
-    }
-
-    #[test]
-    fn test_failure() {
-        let f = TestFixture::new();
-
-        let run = || -> std::result::Result<PathBuf, failure::Error> {
-            // Test the conversion to failure
-            let p = _which(&f, "./b/bin")?;
-            Ok(p)
-        };
-
-        let _ = run();
+impl PartialEq<CanonicalPath> for path::PathBuf {
+    fn eq(&self, other: &CanonicalPath) -> bool {
+        *self == other.inner
     }
 }

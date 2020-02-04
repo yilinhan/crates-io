@@ -11,8 +11,9 @@
 # will likely look very different (and much more reasonable)
 
 [package]
+edition = "2018"
 name = "walkdir"
-version = "2.2.9"
+version = "2.3.1"
 authors = ["Andrew Gallant <jamslam@gmail.com>"]
 exclude = ["/ci/*", "/.travis.yml", "/appveyor.yml"]
 description = "Recursively walk a directory."

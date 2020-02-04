@@ -8,7 +8,7 @@ https://github.com/crossbeam-rs/crossbeam-channel)
 https://crates.io/crates/crossbeam-channel)
 [![Documentation](https://docs.rs/crossbeam-channel/badge.svg)](
 https://docs.rs/crossbeam-channel)
-[![Rust 1.26+](https://img.shields.io/badge/rust-1.26+-lightgray.svg)](
+[![Rust 1.28+](https://img.shields.io/badge/rust-1.28+-lightgray.svg)](
 https://www.rust-lang.org)
 [![chat](https://img.shields.io/discord/569610676205781012.svg?logo=discord)](https://discord.gg/BBYwKq)
 
@@ -41,7 +41,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-crossbeam-channel = "0.3"
+crossbeam-channel = "0.4"
 ```
 
 Next, add this to your crate:
@@ -50,6 +50,10 @@ Next, add this to your crate:
 #[macro_use]
 extern crate crossbeam_channel;
 ```
+
+## Compatibility
+
+The minimum supported Rust version is 1.28. Any change to this is considered a breaking change.
 
 ## License
 

@@ -12,7 +12,7 @@
 
 [package]
 name = "num-integer"
-version = "0.1.41"
+version = "0.1.42"
 authors = ["The Rust Project Developers"]
 build = "build.rs"
 exclude = ["/ci/*", "/.travis.yml", "/bors.toml"]
@@ -27,10 +27,10 @@ repository = "https://github.com/rust-num/num-integer"
 [package.metadata.docs.rs]
 features = ["std"]
 [dependencies.num-traits]
-version = "0.2.4"
+version = "0.2.11"
 default-features = false
 [build-dependencies.autocfg]
-version = "0.1.3"
+version = "1"
 
 [features]
 default = ["std"]

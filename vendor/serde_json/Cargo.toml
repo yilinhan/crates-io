@@ -11,8 +11,9 @@
 # will likely look very different (and much more reasonable)
 
 [package]
+edition = "2018"
 name = "serde_json"
-version = "1.0.44"
+version = "1.0.46"
 authors = ["Erick Tryzelaar <erick.tryzelaar@gmail.com>", "David Tolnay <dtolnay@gmail.com>"]
 include = ["Cargo.toml", "src/**/*.rs", "README.md", "LICENSE-APACHE", "LICENSE-MIT"]
 description = "A JSON serialization file format"
@@ -33,12 +34,14 @@ optional = true
 
 [dependencies.itoa]
 version = "0.4.3"
+default-features = false
 
 [dependencies.ryu]
 version = "1.0"
 
 [dependencies.serde]
 version = "1.0.60"
+default-features = false
 [dev-dependencies.automod]
 version = "0.1"
 
@@ -55,13 +58,16 @@ version = "1.0"
 version = "0.1"
 
 [dev-dependencies.trybuild]
-version = "1.0"
+version = "1.0.19"
+features = ["diff"]
 
 [features]
+alloc = ["serde/alloc"]
 arbitrary_precision = []
-default = []
+default = ["std"]
 preserve_order = ["indexmap"]
 raw_value = []
+std = ["serde/std"]
 unbounded_depth = []
 [badges.appveyor]
 repository = "serde-rs/json"

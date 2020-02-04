@@ -2,7 +2,8 @@ aho-corasick: Unlicense/MIT
 ansi_term: MIT
 anyhow: MIT OR Apache-2.0
 atty: MIT
-autocfg: Apache-2.0/MIT
+autocfg-0.1.7: Apache-2.0/MIT
+autocfg: Apache-2.0 OR MIT
 backtrace: MIT/Apache-2.0
 backtrace-sys: MIT/Apache-2.0
 base64: MIT/Apache-2.0
@@ -29,7 +30,6 @@ crossbeam-channel: MIT/Apache-2.0 AND BSD-2-Clause
 crossbeam-deque: MIT/Apache-2.0
 crossbeam-epoch: MIT/Apache-2.0
 crossbeam-queue: MIT/Apache-2.0 AND BSD-2-Clause
-crossbeam-utils-0.6.6: MIT/Apache-2.0
 crossbeam-utils: MIT/Apache-2.0
 ctrlc: MIT/Apache-2.0
 either: MIT/Apache-2.0
@@ -54,7 +54,7 @@ ignore: Unlicense/MIT
 indexmap: Apache-2.0/MIT
 iovec: MIT/Apache-2.0
 itertools: MIT/Apache-2.0
-itoa: MIT/Apache-2.0
+itoa: MIT OR Apache-2.0
 js-sys: MIT/Apache-2.0
 lazy_static: MIT/Apache-2.0
 libc: MIT OR Apache-2.0
@@ -107,7 +107,7 @@ rayon-core: Apache-2.0/MIT
 rdrand-0.4.0: ISC
 rdrand: ISC
 redox_syscall: MIT
-regex: MIT/Apache-2.0
+regex: MIT OR Apache-2.0
 regex-syntax: MIT/Apache-2.0
 remove_dir_all: MIT/Apache-2.0
 ring: see license file at ring/LICENSE
@@ -188,5 +188,4 @@ winapi-i686-pc-windows-gnu: MIT/Apache-2.0
 winapi: MIT/Apache-2.0
 winapi-util: Unlicense/MIT
 winapi-x86_64-pc-windows-gnu: MIT/Apache-2.0
-wincolor: Unlicense OR MIT
 yasna: MIT/Apache-2.0

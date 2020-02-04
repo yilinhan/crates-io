@@ -12,7 +12,7 @@
 
 [package]
 name = "atty"
-version = "0.2.13"
+version = "0.2.14"
 authors = ["softprops <d.tangren@gmail.com>"]
 exclude = ["/.travis.yml", "/appveyor.yml"]
 description = "A simple interface for querying atty"
@@ -22,6 +22,8 @@ readme = "README.md"
 keywords = ["terminal", "tty", "isatty"]
 license = "MIT"
 repository = "https://github.com/softprops/atty"
+[target."cfg(target_os = \"hermit\")".dependencies.hermit-abi]
+version = "0.1.6"
 [target."cfg(unix)".dependencies.libc]
 version = "0.2"
 default-features = false

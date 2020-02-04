@@ -64,8 +64,8 @@ impl Interner {
     fn intern_str(&self, s: &str) -> &str {
         // NB: eventually this could be used to intern `s` to only allocate one
         // copy, but for now let's just "transmute" `s` to have the same
-        // lifetmie as this struct itself (which is our main goal here)
-        bumpalo::collections::String::from_str_in(s, &self.bump).into_bump_str()
+        // lifetime as this struct itself (which is our main goal here)
+        self.bump.alloc_str(s)
     }
 
     /// Given an import to a local module `id` this generates a unique module id
@@ -306,6 +306,7 @@ fn shared_struct<'a>(s: &'a ast::Struct, intern: &'a Interner) -> Struct<'a> {
             .map(|s| shared_struct_field(s, intern))
             .collect(),
         comments: s.comments.iter().map(|s| &**s).collect(),
+        is_inspectable: s.is_inspectable,
     }
 }
 

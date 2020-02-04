@@ -68,26 +68,26 @@ See [`examples/is_stderr.rs`] for a runnable example and compare the output of:
 #![allow(bare_trait_objects, unknown_lints)]
 #![deny(missing_docs)]
 
-#[cfg(windows)]
-extern crate winapi_util;
+#[cfg(test)]
+doc_comment::doctest!("../README.md");
 
 use std::fs::File;
 use std::io;
 use std::path::Path;
 
 #[cfg(any(target_os = "redox", unix))]
-use unix as imp;
-#[cfg(windows)]
-use win as imp;
+use crate::unix as imp;
 #[cfg(not(any(target_os = "redox", unix, windows)))]
 use unknown as imp;
+#[cfg(windows)]
+use win as imp;
 
 #[cfg(any(target_os = "redox", unix))]
 mod unix;
-#[cfg(windows)]
-mod win;
 #[cfg(not(any(target_os = "redox", unix, windows)))]
 mod unknown;
+#[cfg(windows)]
+mod win;
 
 /// A handle to a file that can be tested for equality with other handles.
 ///
@@ -105,7 +105,7 @@ mod unknown;
 /// implementation details.
 ///
 /// [source]: https://github.com/BurntSushi/same-file/tree/master/src
-#[derive(Debug, Eq, PartialEq)]
+#[derive(Debug, Eq, PartialEq, Hash)]
 pub struct Handle(imp::Handle);
 
 impl Handle {
@@ -367,10 +367,11 @@ impl Handle {
 ///
 /// assert!(is_same_file("./foo", "././foo").unwrap_or(false));
 /// ```
-pub fn is_same_file<P, Q>(
-    path1: P,
-    path2: Q,
-) -> io::Result<bool> where P: AsRef<Path>, Q: AsRef<Path> {
+pub fn is_same_file<P, Q>(path1: P, path2: Q) -> io::Result<bool>
+where
+    P: AsRef<Path>,
+    Q: AsRef<Path>,
+{
     Ok(Handle::from_path(path1)? == Handle::from_path(path2)?)
 }
 
@@ -414,7 +415,9 @@ mod tests {
         fn new() -> Result<TempDir> {
             #![allow(deprecated)]
 
-            use std::sync::atomic::{ATOMIC_USIZE_INIT, AtomicUsize, Ordering};
+            use std::sync::atomic::{
+                AtomicUsize, Ordering, ATOMIC_USIZE_INIT,
+            };
 
             static TRIES: usize = 100;
             static COUNTER: AtomicUsize = ATOMIC_USIZE_INIT;

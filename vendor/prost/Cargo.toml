@@ -13,7 +13,7 @@
 [package]
 edition = "2018"
 name = "prost"
-version = "0.6.0"
+version = "0.6.1"
 authors = ["Dan Burkert <dan@danburkert.com>"]
 description = "A Protocol Buffers implementation for the Rust Language."
 documentation = "https://docs.rs/prost"
@@ -35,7 +35,7 @@ harness = false
 version = "0.5"
 
 [dependencies.prost-derive]
-version = "0.6.0"
+version = "0.6.1"
 optional = true
 [dev-dependencies.criterion]
 version = "0.3"

@@ -2,7 +2,7 @@
 petgraph
 ========
 
-Graph data structure library. Requires Rust 1.12.
+Graph data structure library. Known to support Rust 1.37 and later.
 
 Please read the `API documentation here`__
 
@@ -10,8 +10,8 @@ __ https://docs.rs/petgraph/
 
 |build_status|_ |crates|_
 
-.. |build_status| image:: https://travis-ci.org/bluss/petgraph.svg?branch=master
-.. _build_status: https://travis-ci.org/bluss/petgraph
+.. |build_status| image:: https://travis-ci.org/petgraph/petgraph.svg?branch=master
+.. _build_status: https://travis-ci.org/petgraph/petgraph
 
 .. |crates| image:: http://meritbadge.herokuapp.com/petgraph
 .. _crates: https://crates.io/crates/petgraph
@@ -20,11 +20,22 @@ Crate feature flags:
 
 - ``graphmap`` (default) enable ``GraphMap``.
 - ``stable_graph`` (default) enable ``StableGraph``.
+- ``matrix_graph`` (default) enable ``MatrixGraph``.
 - ``serde-1`` (optional) enable serialization for ``Graph, StableGraph`` using
   serde 1.0. Requires Rust version as required by serde.
 
 Recent Changes
 --------------
+
+- 0.5.0
+
+  - Upgrade to Rust 2018 edition
+  - Fix clippy warnings and unify code formatting
+  - Improved and enhanced documentation
+  - Update dependencies including modern quickcheck
+  - Numerous bugfixes and refactorings
+  - Added ``MatrixGraph`` implementation
+  - Added ``InfoEdges`` and ``InfoEdgesDirected``
 
 - 0.4.13
 
@@ -39,7 +50,7 @@ Recent Changes
 
 - 0.4.11
 
-  - Fix ``petgraph::graph::NodeReferences`` to be publically visible
+  - Fix ``petgraph::graph::NodeReferences`` to be publicly visible
   - Small doc typo and code style files by @shepmaster and @waywardmonkeys
   - Fix a future compat warning with pointer casts
 
@@ -198,7 +209,7 @@ Recent Changes
   - ``GraphMap`` can now have directed edges. ``GraphMap::new`` is now generic
     in the edge type. ``DiGraphMap`` and ``UnGraphMap`` are new type aliases.
   - Add type aliases ``DiGraph, UnGraph, StableDiGraph, StableUnGraph``
-  - ``GraphMap`` is based on the ordermap crate. Deterministic iteration
+  - ``GraphMap`` is based on the indexmap crate. Deterministic iteration
     order, faster iteration, no side tables needed to convert to ``Graph``.
   - Improved docs for a lot of types and functions.
   - Add graph visitor ``DfsPostOrder``
@@ -308,7 +319,7 @@ Recent Changes
   - Add Graph::capacity(), GraphMap::capacity()
   - Fix bug in Graph::reverse()
   - Graph and GraphMap have `quickcheck::Arbitrary` implementations,
-    if optional feature `quickcheck` is enabled.
+    if optional feature `check` is enabled.
 
 - 0.1.16
 

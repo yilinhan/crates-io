@@ -3,8 +3,8 @@ use std::fmt;
 use std::fs::{self, FileType};
 use std::path::{Path, PathBuf};
 
-use error::Error;
-use Result;
+use crate::error::Error;
+use crate::Result;
 
 /// A directory entry.
 ///
@@ -57,7 +57,6 @@ pub struct DirEntry {
     #[cfg(windows)]
     metadata: fs::Metadata,
 }
-
 
 impl DirEntry {
     /// The full path that this entry represents.
@@ -134,7 +133,8 @@ impl DirEntry {
             fs::metadata(&self.path)
         } else {
             Ok(self.metadata.clone())
-        }.map_err(|err| Error::from_entry(self, err))
+        }
+        .map_err(|err| Error::from_entry(self, err))
     }
 
     #[cfg(not(windows))]
@@ -143,7 +143,8 @@ impl DirEntry {
             fs::metadata(&self.path)
         } else {
             fs::symlink_metadata(&self.path)
-        }.map_err(|err| Error::from_entry(self, err))
+        }
+        .map_err(|err| Error::from_entry(self, err))
     }
 
     /// Return the file type for the file that this entry points to.
@@ -198,12 +199,12 @@ impl DirEntry {
         ent: &fs::DirEntry,
     ) -> Result<DirEntry> {
         let path = ent.path();
-        let ty = ent.file_type().map_err(|err| {
-            Error::from_path(depth, path.clone(), err)
-        })?;
-        let md = ent.metadata().map_err(|err| {
-            Error::from_path(depth, path.clone(), err)
-        })?;
+        let ty = ent
+            .file_type()
+            .map_err(|err| Error::from_path(depth, path.clone(), err))?;
+        let md = ent
+            .metadata()
+            .map_err(|err| Error::from_path(depth, path.clone(), err))?;
         Ok(DirEntry {
             path: path,
             ty: ty,
@@ -220,9 +221,9 @@ impl DirEntry {
     ) -> Result<DirEntry> {
         use std::os::unix::fs::DirEntryExt;
 
-        let ty = ent.file_type().map_err(|err| {
-            Error::from_path(depth, ent.path(), err)
-        })?;
+        let ty = ent
+            .file_type()
+            .map_err(|err| Error::from_path(depth, ent.path(), err))?;
         Ok(DirEntry {
             path: ent.path(),
             ty: ty,
@@ -237,9 +238,9 @@ impl DirEntry {
         depth: usize,
         ent: &fs::DirEntry,
     ) -> Result<DirEntry> {
-        let ty = ent.file_type().map_err(|err| {
-            Error::from_path(depth, ent.path(), err)
-        })?;
+        let ty = ent
+            .file_type()
+            .map_err(|err| Error::from_path(depth, ent.path(), err))?;
         Ok(DirEntry {
             path: ent.path(),
             ty: ty,
@@ -254,16 +255,13 @@ impl DirEntry {
         pb: PathBuf,
         follow: bool,
     ) -> Result<DirEntry> {
-        let md =
-            if follow {
-                fs::metadata(&pb).map_err(|err| {
-                    Error::from_path(depth, pb.clone(), err)
-                })?
-            } else {
-                fs::symlink_metadata(&pb).map_err(|err| {
-                    Error::from_path(depth, pb.clone(), err)
-                })?
-            };
+        let md = if follow {
+            fs::metadata(&pb)
+                .map_err(|err| Error::from_path(depth, pb.clone(), err))?
+        } else {
+            fs::symlink_metadata(&pb)
+                .map_err(|err| Error::from_path(depth, pb.clone(), err))?
+        };
         Ok(DirEntry {
             path: pb,
             ty: md.file_type(),
@@ -281,16 +279,13 @@ impl DirEntry {
     ) -> Result<DirEntry> {
         use std::os::unix::fs::MetadataExt;
 
-        let md =
-            if follow {
-                fs::metadata(&pb).map_err(|err| {
-                    Error::from_path(depth, pb.clone(), err)
-                })?
-            } else {
-                fs::symlink_metadata(&pb).map_err(|err| {
-                    Error::from_path(depth, pb.clone(), err)
-                })?
-            };
+        let md = if follow {
+            fs::metadata(&pb)
+                .map_err(|err| Error::from_path(depth, pb.clone(), err))?
+        } else {
+            fs::symlink_metadata(&pb)
+                .map_err(|err| Error::from_path(depth, pb.clone(), err))?
+        };
         Ok(DirEntry {
             path: pb,
             ty: md.file_type(),
@@ -306,16 +301,13 @@ impl DirEntry {
         pb: PathBuf,
         follow: bool,
     ) -> Result<DirEntry> {
-        let md =
-            if follow {
-                fs::metadata(&pb).map_err(|err| {
-                    Error::from_path(depth, pb.clone(), err)
-                })?
-            } else {
-                fs::symlink_metadata(&pb).map_err(|err| {
-                    Error::from_path(depth, pb.clone(), err)
-                })?
-            };
+        let md = if follow {
+            fs::metadata(&pb)
+                .map_err(|err| Error::from_path(depth, pb.clone(), err))?
+        } else {
+            fs::symlink_metadata(&pb)
+                .map_err(|err| Error::from_path(depth, pb.clone(), err))?
+        };
         Ok(DirEntry {
             path: pb,
             ty: md.file_type(),
@@ -360,7 +352,7 @@ impl Clone for DirEntry {
 }
 
 impl fmt::Debug for DirEntry {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "DirEntry({:?})", self.path)
     }
 }

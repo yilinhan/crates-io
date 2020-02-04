@@ -92,10 +92,19 @@ jobs:
       # - template: ci/azure-install-sccache.yml
       - script: rustup target add wasm32-unknown-unknown
         displayName: "install wasm target"
+      - task: NodeTool@0
+        inputs:
+          versionSpec: '>=13.0'
       - script: cargo test -p wasm-bindgen-cli-support
         displayName: "wasm-bindgen-cli-support tests"
       - script: cargo test -p wasm-bindgen-cli
         displayName: "wasm-bindgen-cli tests"
+      - script: cargo test -p wasm-bindgen-anyref-xform
+        displayName: "wasm-bindgen-anyref-xform tests"
+      - script: cargo test -p wasm-bindgen-multi-value-xform
+        displayName: "wasm-bindgen-multi-value-xform tests"
+      - script: cargo test -p wasm-bindgen-wasm-interpreter
+        displayName: "wasm-bindgen-wasm-interpreter tests"
 
   - job: test_web_sys
     displayName: "Run web-sys crate tests"
@@ -154,23 +163,6 @@ jobs:
       # - template: ci/azure-install-sccache.yml
       - script: cargo test -p wasm-bindgen-macro
 
-  - job: test_wasm_interpreter
-    displayName: "Run wasm-bindgen-wasm-interpreter tests"
-    steps:
-      - template: ci/azure-install-rust.yml
-      # Temporarily disable sccache because it is failing on CI.
-      # - template: ci/azure-install-sccache.yml
-      - script: |
-          git clone https://github.com/WebAssembly/wabt
-          mkdir -p wabt/build
-          cd wabt/build
-          # Temporarily disable sccache because it is failing on CI.
-          # cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=off -DCMAKE_CXX_COMPILER_LAUNCHER=$RUSTC_WRAPPER
-          cmake .. -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTS=off
-          cmake --build . -- -j$(nproc)
-          echo "##vso[task.prependpath]$PWD"
-      - script: cargo test -p wasm-bindgen-wasm-interpreter
-
   - job: test_typescript_output
     displayName: "Test TypeScript output of wasm-bindgen"
     steps:
@@ -209,7 +201,7 @@ jobs:
     steps:
       - template: ci/azure-install-rust.yml
         parameters:
-          toolchain: nightly-2019-10-04
+          toolchain: nightly-2020-01-06
       # Temporarily disable sccache because it is failing on CI.
       # - template: ci/azure-install-sccache.yml
       - script: rustup component add rust-src

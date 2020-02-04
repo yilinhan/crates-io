@@ -13,7 +13,7 @@
 [package]
 edition = "2018"
 name = "prost-types"
-version = "0.6.0"
+version = "0.6.1"
 authors = ["Dan Burkert <dan@danburkert.com>"]
 description = "A Protocol Buffers implementation for the Rust Language."
 documentation = "https://docs.rs/prost-types"
@@ -28,4 +28,4 @@ doctest = false
 version = "0.5"
 
 [dependencies.prost]
-version = "0.6.0"
+version = "0.6.1"

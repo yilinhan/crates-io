@@ -11,7 +11,6 @@ use std::f64;
 use std::fmt;
 use std::iter;
 use std::marker::PhantomData;
-use std::mem::discriminant;
 use std::str;
 use std::vec;
 
@@ -146,10 +145,6 @@ enum ErrorKind {
         /// Actually found token type
         found: &'static str,
     },
-
-    /// An array was decoded but the types inside of it were mixed, which is
-    /// disallowed by TOML.
-    MixedArrayType,
 
     /// A duplicate table definition was found.
     DuplicateTable(String),
@@ -1827,13 +1822,7 @@ impl<'a> Deserializer<'a> {
             if let Some(span) = self.eat_spanned(Token::RightBracket)? {
                 return Ok((span, ret));
             }
-            let at = self.tokens.current();
             let value = self.value()?;
-            if let Some(last) = ret.last() {
-                if !value.same_type(last) {
-                    return Err(self.error(at, ErrorKind::MixedArrayType));
-                }
-            }
             ret.push(value);
             intermediate(self)?;
             if !self.eat(Token::Comma)? {
@@ -2118,7 +2107,6 @@ impl fmt::Display for Error {
             }
             ErrorKind::NumberInvalid => "invalid number".fmt(f)?,
             ErrorKind::DateInvalid => "invalid date".fmt(f)?,
-            ErrorKind::MixedArrayType => "mixed types in an array".fmt(f)?,
             ErrorKind::DuplicateTable(ref s) => {
                 write!(f, "redefinition of table `{}`", s)?;
             }
@@ -2165,36 +2153,7 @@ impl fmt::Display for Error {
     }
 }
 
-impl error::Error for Error {
-    fn description(&self) -> &str {
-        match self.inner.kind {
-            ErrorKind::UnexpectedEof => "unexpected eof encountered",
-            ErrorKind::InvalidCharInString(_) => "invalid char in string",
-            ErrorKind::InvalidEscape(_) => "invalid escape in string",
-            ErrorKind::InvalidHexEscape(_) => "invalid hex escape in string",
-            ErrorKind::InvalidEscapeValue(_) => "invalid escape value in string",
-            ErrorKind::NewlineInString => "newline in string found",
-            ErrorKind::Unexpected(_) => "unexpected or invalid character",
-            ErrorKind::UnterminatedString => "unterminated string",
-            ErrorKind::NewlineInTableKey => "found newline in table key",
-            ErrorKind::Wanted { .. } => "expected a token but found another",
-            ErrorKind::NumberInvalid => "invalid number",
-            ErrorKind::DateInvalid => "invalid date",
-            ErrorKind::MixedArrayType => "mixed types in an array",
-            ErrorKind::DuplicateTable(_) => "duplicate table",
-            ErrorKind::RedefineAsArray => "table redefined as array",
-            ErrorKind::EmptyTableKey => "empty table key found",
-            ErrorKind::MultilineStringKey => "invalid multiline string for key",
-            ErrorKind::Custom => "a custom error",
-            ErrorKind::ExpectedTuple(_) => "expected table length",
-            ErrorKind::ExpectedTupleIndex { .. } => "expected table key",
-            ErrorKind::ExpectedEmptyTable => "expected empty table",
-            ErrorKind::DottedKeyInvalidType => "dotted key invalid type",
-            ErrorKind::UnexpectedKeys { .. } => "unexpected keys in table",
-            ErrorKind::__Nonexhaustive => panic!(),
-        }
-    }
-}
+impl error::Error for Error {}
 
 impl de::Error for Error {
     fn custom<T: fmt::Display>(msg: T) -> Error {
@@ -2281,11 +2240,5 @@ impl<'a> E<'a> {
             E::InlineTable(..) => "inline table",
             E::DottedTable(..) => "dotted table",
         }
-    }
-}
-
-impl<'a> Value<'a> {
-    fn same_type(&self, other: &Value<'a>) -> bool {
-        discriminant(&self.e) == discriminant(&other.e)
     }
 }

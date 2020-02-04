@@ -13,7 +13,7 @@
 [package]
 edition = "2018"
 name = "wasm-bindgen-webidl"
-version = "0.2.55"
+version = "0.2.58"
 authors = ["The wasm-bindgen Developers"]
 description = "Support for parsing WebIDL specific to wasm-bindgen\n"
 homepage = "https://rustwasm.github.io/wasm-bindgen/"
@@ -41,7 +41,7 @@ version = "1.0"
 features = ["full"]
 
 [dependencies.wasm-bindgen-backend]
-version = "=0.2.55"
+version = "=0.2.58"
 
 [dependencies.weedle]
 version = "0.10"

@@ -15,7 +15,7 @@
 Bump allocation is a fast, but limited approach to allocation. We have a chunk
 of memory, and we maintain a pointer within that memory. Whenever we allocate an
 object, we do a quick test that we have enough capacity left in our chunk to
-allocate the object and then increment the pointer by the object's size. *That's
+allocate the object and then update the pointer by the object's size. *That's
 it!*
 
 The disadvantage of bump allocation is that there is no general way to
@@ -65,8 +65,8 @@ assert!(scooter.scritches_required);
 
 ### Collections
 
-When the on-by-default `"collections"` feature is enabled, a fork of some of the
-`std` library's collections are available in the `collections` module. These
+When the `"collections"` cargo feature is enabled, a fork of some of the `std`
+library's collections are available in the `collections` module. These
 collection types are modified to allocate their space inside `bumpalo::Bump`
 arenas.
 
@@ -93,11 +93,5 @@ this `collections` module and use the `std` versions.
 
 ### `#![no_std]` Support
 
-Requires the `alloc` nightly feature. Disable the on-by-default `"std"` feature:
-
-```toml
-[dependencies.bumpalo]
-version = "1"
-default-features = false
-```
+Bumpalo is a `no_std` crate. It depends only on the `alloc` and `core` crates.
 

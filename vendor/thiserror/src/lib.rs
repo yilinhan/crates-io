@@ -126,7 +126,7 @@
 //!   #[derive(Error, Debug)]
 //!   pub struct MyError {
 //!       msg: String,
-//!       #[source] // optional if field name is `source`
+//!       #[source]  // optional if field name is `source`
 //!       source: anyhow::Error,
 //!   }
 //!   #
@@ -147,9 +147,24 @@
 //!   #[derive(Error, Debug)]
 //!   pub struct MyError {
 //!       msg: String,
-//!       backtrace: Backtrace, // automatically detected
+//!       backtrace: Backtrace,  // automatically detected
 //!   }
 //!   # };
+//!   ```
+//!
+//! - Errors may use `error(transparent)` to forward the source and Display
+//!   methods straight through to an underlying error without adding an
+//!   additional message. This would be appropriate for enums that need an
+//!   "anything else" variant.
+//!
+//!   ```
+//!   #[derive(Error, Debug)]
+//!   pub enum MyError {
+//!       ...
+//!
+//!       #[error(transparent)]
+//!       Other(#[from] anyhow::Error),  // source and Display delegate to anyhow::Error
+//!   }
 //!   ```
 //!
 //! - See also the [`anyhow`] library for a convenient single error type to use

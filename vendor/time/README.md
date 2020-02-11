@@ -1,30 +1,26 @@
-time
-====
+# time
 
-Utilities for working with time-related functions in Rust
+![build status](https://github.com/time-rs/time/workflows/Build/badge.svg)
+[![documentation status](https://github.com/time-rs/time/workflows/Documentation/badge.svg)](https://time-rs.github.io/time/time/index.html)
+<br>
+[![Matrix](https://img.shields.io/badge/chat-Matrix/Riot-blue)](https://riot.im/app/#/room/!AAFrFkLHvtsXtMYRho:matrix.org)
+![license](https://img.shields.io/badge/license-MIT%20or%20Apache--2-brightgreen)
+![version](https://img.shields.io/crates/v/time)
+![rustc 1.34.0](https://img.shields.io/badge/rustc-1.34.0-blue)
 
-[![Build Status](https://travis-ci.org/rust-lang-deprecated/time.svg?branch=master)](https://travis-ci.org/rust-lang-deprecated/time)
-[![Build status](https://ci.appveyor.com/api/projects/status/55m7rbaj9a5v3ad7?svg=true)](https://ci.appveyor.com/project/alexcrichton/time)
+[Documentation (master)](https://time-rs.github.io/time/time/index.html)
+<br>
+[Documentation (latest release)](https://docs.rs/time)
 
-[Documentation](https://doc.rust-lang.org/time)
+## License
 
-## Notes
+This project is licensed under either of
 
-This library is no longer actively maintained, but bugfixes will be added ([details](https://github.com/rust-lang-deprecated/time/issues/136)).
+- [Apache License, Version 2.0](https://github.com/time-rs/time/blob/master/LICENSE-Apache)
+- [MIT license](https://github.com/time-rs/time/blob/master/LICENSE-MIT)
 
-In case you're looking for something a little fresher and more actively maintained have a look at the [`chrono`](https://github.com/lifthrasiir/rust-chrono) crate.
+at your option.
 
-## Usage
-
-Put this in your `Cargo.toml`:
-
-```toml
-[dependencies]
-time = "0.1"
-```
-
-And this in your crate root:
-
-```rust
-extern crate time;
-```
+Unless you explicitly state otherwise, any contribution intentionally submitted
+for inclusion in time by you, as defined in the Apache-2.0 license, shall be
+dual licensed as above, without any additional terms or conditions.

@@ -1,6 +1,16 @@
 [source.crates-io]
 replace-with = "vendored-sources"
 
+[source."https://github.com/SergioBenitez/Devise.git"]
+git = "https://github.com/SergioBenitez/Devise.git"
+rev = "e58b3ac9a"
+replace-with = "vendored-sources"
+
+[source."https://github.com/SergioBenitez/Rocket"]
+git = "https://github.com/SergioBenitez/Rocket"
+branch = "master"
+replace-with = "vendored-sources"
+
 [source."https://github.com/apache/teaclave-sgx-sdk"]
 git = "https://github.com/apache/teaclave-sgx-sdk"
 rev = "v1.1.0"

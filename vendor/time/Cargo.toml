@@ -3,7 +3,7 @@
 # When uploading crates to the registry Cargo will automatically
 # "normalize" Cargo.toml files for maximal compatibility
 # with all versions of Cargo and also rewrite `path` dependencies
-# to registry (e.g. crates.io) dependencies
+# to registry (e.g., crates.io) dependencies
 #
 # If you believe there's an error in this file please file an
 # issue against the rust-lang/cargo repository. If you're
@@ -11,33 +11,32 @@
 # will likely look very different (and much more reasonable)
 
 [package]
+edition = "2018"
 name = "time"
-version = "0.1.42"
-authors = ["The Rust Project Developers"]
-description = "Utilities for working with time-related functions in Rust.\n"
-homepage = "https://github.com/rust-lang/time"
-documentation = "https://doc.rust-lang.org/time"
-license = "MIT/Apache-2.0"
-repository = "https://github.com/rust-lang/time"
-[dependencies.libc]
-version = "0.2.1"
+version = "0.2.6"
+authors = ["Jacob Pratt <the.z.cuber@gmail.com>"]
+description = "Date and time library. Fully interoperable with the standard library. Mostly compatible with #![no_std]."
+readme = "README.md"
+keywords = ["date", "time", "calendar", "duration"]
+categories = ["date-and-time"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/time-rs/time"
+[package.metadata.docs.rs]
+all-features = true
+[dependencies.rustversion]
+version = "1"
 
-[dependencies.rustc-serialize]
-version = "0.3"
+[dependencies.serde]
+version = "1"
+features = ["derive"]
 optional = true
-[dev-dependencies.log]
-version = "0.4"
+default-features = false
 
-[dev-dependencies.winapi]
-version = "0.3.0"
-features = ["std", "processthreadsapi", "winbase"]
-[target."cfg(target_os = \"redox\")".dependencies.redox_syscall]
+[dependencies.time-macros]
 version = "0.1"
-[target."cfg(windows)".dependencies.winapi]
-version = "0.3.0"
-features = ["std", "minwinbase", "minwindef", "ntdef", "profileapi", "sysinfoapi", "timezoneapi"]
-[badges.appveyor]
-repository = "alexcrichton/time"
 
-[badges.travis-ci]
-repository = "rust-lang-deprecated/time"
+[features]
+default = ["deprecated", "std"]
+deprecated = []
+panicking-api = []
+std = []

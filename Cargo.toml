@@ -46,6 +46,8 @@ wabt                 = "0.4.0"
 webpki               = "0.21.0"
 webpki-roots         = "0.17.0"
 yasna                = "0.3.0"
+pem = "0.7.0"
+rocket           = { git = "https://github.com/SergioBenitez/Rocket", features = ["tls"] }
 
 sgx_cov              = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.0" }
 sgx_tcrypto          = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.0" }

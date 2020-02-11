@@ -6,34 +6,53 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[macro_use]
-extern crate structopt;
+mod utils;
 
 use structopt::StructOpt;
+use utils::*;
 
 #[test]
 fn no_author_version_about() {
     #[derive(StructOpt, PartialEq, Debug)]
-    #[structopt(name = "foo", about = "", author = "", version = "")]
+    #[structopt(name = "foo", no_version)]
     struct Opt {}
 
-    let mut output = Vec::new();
-    Opt::clap().write_long_help(&mut output).unwrap();
-    let output = String::from_utf8(output).unwrap();
-
+    let output = get_long_help::<Opt>();
     assert!(output.starts_with("foo \n\nUSAGE:"));
 }
 
 #[test]
 fn use_env() {
     #[derive(StructOpt, PartialEq, Debug)]
-    #[structopt()]
+    #[structopt(author, about)]
     struct Opt {}
 
-    let mut output = Vec::new();
-    Opt::clap().write_long_help(&mut output).unwrap();
-    let output = String::from_utf8(output).unwrap();
-    assert!(output.starts_with("structopt 0.2."));
+    let output = get_long_help::<Opt>();
+    assert!(output.starts_with("structopt 0."));
     assert!(output.contains("Guillaume Pinot <texitoi@texitoi.eu>, others"));
     assert!(output.contains("Parse command line argument by defining a struct."));
+}
+
+#[test]
+fn explicit_version_not_str() {
+    const VERSION: &str = "custom version";
+
+    #[derive(StructOpt)]
+    #[structopt(version = VERSION)]
+    pub struct Opt {}
+
+    let output = get_long_help::<Opt>();
+    assert!(output.contains("custom version"));
+}
+
+#[test]
+fn no_version_gets_propagated() {
+    #[derive(StructOpt, PartialEq, Debug)]
+    #[structopt(no_version)]
+    enum Action {
+        Move,
+    }
+
+    let output = get_subcommand_long_help::<Action>("move");
+    assert_eq!(output.lines().next(), Some("test-move "));
 }

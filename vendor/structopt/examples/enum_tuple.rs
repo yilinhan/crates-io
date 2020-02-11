@@ -1,5 +1,4 @@
-#[macro_use]
-extern crate structopt;
+//! How to extract subcommands' args into external structs.
 
 use structopt::StructOpt;
 

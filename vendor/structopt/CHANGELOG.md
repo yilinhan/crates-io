@@ -1,12 +1,286 @@
-# v0.2.18 (2019-06-26)
+# v0.3.9 (2020-02-01)
 
-* Add optional feature to support `paw` by [@gameldar](https://github.com/gameldar)
-  ([#187](https://github.com/TeXitoi/structopt/issues/187))
+* `clippy` warnings triggered by generated code shall not annoy you anymore!
+  Except for those from `clippy::correctness`, these lints are useful even
+  for auto generated code.
+* Improved error messages.
+
+# v0.3.8 (2020-1-19)
+
+* You don't have to apply `#[no_version]` to every `enum` variant anymore.
+  Just annotate the `enum` and the setting will be propagated down
+  ([#242](https://github.com/TeXitoi/structopt/issues/242)).
+* [Auto-default](https://docs.rs/structopt/0.3/structopt/#default-values).
+* [External subcommands](https://docs.rs/structopt/0.3/structopt/#external-subcommands).
+* [Flattening subcommands](https://docs.rs/structopt/0.3.8/structopt/#flattening-subcommands).
+
+# v0.3.7 (2019-12-28)
+
+Nothing's new. Just re-release of `v0.3.6` due to
+[the mess with versioning](https://github.com/TeXitoi/structopt/issues/315#issuecomment-568502792).
+
+You may notice that `structopt-derive` was bumped to `v0.4.0`, that's OK, it's not a breaking change.
+`structopt` will pull the right version in on its on.
+
+# v0.3.6 (2019-12-22) - YANKED
+
+This is unusually big patch release. It contains a number of bugfixes and
+new features, some of them may theoretically be considered breaking. We did our best
+to avoid any problems on user's side but, if it wasn't good enough, please
+[file an issue ASAP](https://github.com/TeXitoi/structopt/issues).
+
+## Bugfixes
+
+* `structopt` used to treat `::path::to::type::Vec<T>` as `Vec<T>`
+  special type. [This was considered erroneous](https://github.com/TeXitoi/structopt/pull/287).
+  (same for `Option<T>` and `bool`). Now only exact `Vec<T>` match is a special type.
+
+* `#[structopt(version = expr)]` where `expr` is not a string literal used to get
+  overridden by auto generated `.version()` call,
+  [incorrectly](https://github.com/TeXitoi/structopt/issues/283). Now it doesn't.
+
+* Fixed bug with top-level `App::*` calls on multiple `struct`s, see
+  [#289](https://github.com/TeXitoi/structopt/issues/265).
+
+* Positional `bool` args with no explicit `#[structopt(parse(...))]` annotation are
+  now prohibited. This couldn't work well anyway, see
+  [this example](https://github.com/TeXitoi/structopt/blob/master/examples/true_or_false.rs)
+  for details.
+
+* Now we've instituted strict priority between doc comments, about, help, and the like.
+  See [the documentation](https://docs.rs/structopt/0.3/structopt/#help-messages).
+
+  **HUGE THANKS to [`@ssokolow`](https://github.com/ssokolow)** for tidying up our documentation,
+  teaching me English and explaining why our doc used to suck. I promise I'll make the rest
+  of the doc up to your standards... sometime later!
+
+## New features
+
+* Implement `StructOpt` for `Box<impl StructOpt>` so from now on you can use `Box<T>`
+  with `flatten` and `subcommand` ([#304](https://github.com/TeXitoi/structopt/issues/304)).
+
+  ```rust
+  enum Command {
+      #[structopt(name = "version")]
+      PrintVersion,
+
+      #[structopt(name = "second")]
+      DoSomething {
+          #[structopt(flatten)]
+          config: Box<DoSomethingConfig>,
+      },
+
+      #[structopt(name = "first")]
+      DoSomethingElse {
+          #[structopt(flatten)]
+          config: Box<DoSomethingElseConfig>,
+      }
+  }
+  ```
+
+* Introduced `#[structopt(verbatim_doc_comment)]` attribute that keeps line breaks in
+  doc comments, see
+  [the documentation](https://docs.rs/structopt/0.3/structopt/#doc-comment-preprocessing-and-structoptverbatim_doc_comment).
+
+* Introduced `#[structopt(rename_all_env)]` and `#[structopt(env)]` magical methods
+  so you can derive env var's name from field's name. See
+  [the documentation](https://docs.rs/structopt/0.3/structopt/#auto-deriving-environment-variables).
+
+## Improvements
+
+* Now we have nice README for our examples,
+  [check it out](https://github.com/TeXitoi/structopt/tree/master/examples)!
+
+* Some error messages were improved and clarified, thanks for all people involved!
+
+
+# v0.3.5 (2019-11-22)
+
+* `try_from_str` functions are now called with a `&str` instead of a `&String` ([#282](https://github.com/TeXitoi/structopt/pull/282))
+
+# v0.3.4 (2019-11-08)
+
+* `rename_all` does not apply to fields that were annotated with explicit
+  `short/long/name = "..."` anymore ([#265](https://github.com/TeXitoi/structopt/issues/265))
+* Now raw idents are handled correctly ([#269](https://github.com/TeXitoi/structopt/issues/269))
+* Some documentation improvements and clarification.
+
+# v0.3.3 (2019-10-10)
+
+* Add `from_flag` custom parser to create flags from non-bool types.
+  Fixes [#185](https://github.com/TeXitoi/structopt/issues/185)
+
+# v0.3.2 (2019-09-18)
+
+* `structopt` does not replace `:` with `, ` inside "author" strings while inside `<...>`.
+  Fixes [#156](https://github.com/TeXitoi/structopt/issues/156)
+* Introduced [`#[structopt(skip = expr)]` syntax](https://docs.rs/structopt/0.3.2/structopt/#skipping-fields).
+
+# v0.3.1 (2019-09-06)
+
+* Fix error messages ([#241](https://github.com/TeXitoi/structopt/issues/241))
+* Fix "`skip` plus long doc comment" bug ([#245](https://github.com/TeXitoi/structopt/issues/245))
+* Now `structopt` emits dummy `StructOpt` implementation along with an error. It suppresses
+  meaningless errors like `from_args method is not found for Opt`
+* `.version()` not get generated if `CARGO_PKG_VERSION` is not set anymore.
+
+# v0.3.0 (2019-08-30)
+
+## Breaking changes
+
+### Bump minimum rustc version to 1.36 by [@TeXitoi](https://github.com/TeXitoi)
+Now `rustc` 1.36 is the minimum compiler version supported by `structopt`,
+it likely won't work with older compilers.
+
+### Remove "nightly" feature
+Once upon a time this feature had been used to enable some of improvements
+in `proc-macro2` crate that were available only on nightly. Nowadays this feature doesn't
+mean anything so it's now removed.
+
+### Support optional vectors of arguments for distinguishing between `-o 1 2`, `-o` and no option provided at all by [@sphynx](https://github.com/sphynx) ([#180](https://github.com/TeXitoi/structopt/issues/188)).
+
+```rust
+#[derive(StructOpt)]
+struct Opt {
+  #[structopt(long)]
+  fruit: Option<Vec<String>>,
+}
+
+fn main() {
+  assert_eq!(Opt::from_args(&["test"]), None);
+  assert_eq!(Opt::from_args(&["test", "--fruit"]), Some(vec![]));
+  assert_eq!(Opt::from_args(&["test", "--fruit=apple orange"]), Some(vec!["apple", "orange"]));
+}
+```
+
+If you need to fall back to the old behavior you can use a type alias:
+```rust
+type Something = Vec<String>;
+
+#[derive(StructOpt)]
+struct Opt {
+  #[structopt(long)]
+  fruit: Option<Something>,
+}
+```
+
+### Change default case from 'Verbatim' into 'Kebab' by [@0ndorio](https://github.com/0ndorio) ([#202](https://github.com/TeXitoi/structopt/issues/202)).
+`structopt` 0.3 uses field renaming to deduce a name for long options and subcommands.
+
+```rust
+#[derive(StructOpt)]
+struct Opt {
+  #[structopt(long)]
+  http_addr: String, // will be renamed to `--http-addr`
+
+  #[structopt(subcommand)]
+  addr_type: AddrType // this adds `addr-type` subcommand
+}
+```
+
+`structopt` 0.2 used to leave things "as is", not renaming anything. If you want to keep old
+behavior add `#[structopt(rename_all = "verbatim")]` on top of a `struct`/`enum`.
+
+### Change `version`, `author` and `about` attributes behavior.
+Proposed by [@TeXitoi](https://github.com/TeXitoi) [(#217)](https://github.com/TeXitoi/structopt/issues/217), implemented by [@CreepySkeleton](https://github.com/CreepySkeleton) [(#229)](https://github.com/TeXitoi/structopt/pull/229).
+
+`structopt` have been deducing `version`, `author`, and `about` properties from `Cargo.toml`
+for a long time (more accurately, from `CARGO_PKG_...` environment variables).
+But many users found this behavior somewhat confusing, and a hack was added to cancel out
+this behavior: `#[structopt(author = "")]`.
+
+In `structopt` 0.3 this has changed.
+* `author` and `about` are no longer deduced by default. You should use `#[structopt(author, about)]`
+  to explicitly request `structopt` to deduce them.
+* Contrary, `version` **is still deduced by default**. You can use `#[structopt(no_version)]` to
+  cancel it out.
+* `#[structopt(author = "", about = "", version = "")]` is no longer a valid syntax
+  and will trigger an error.
+* `#[structopt(version = "version", author = "author", about = "about")]` syntax
+  stays unaffected by this changes.
+
+### Raw attributes are removed ([#198](https://github.com/TeXitoi/structopt/pull/198)) by [@sphynx](https://github.com/sphynx)
+In `structopt` 0.2 you were able to use any method from `clap::App` and `clap::Arg` via
+raw attribute: `#[structopt(raw(method_name = "arg"))]`. This syntax was kind of awkward.
+
+```rust
+#[derive(StructOpt, Debug)]
+#[structopt(raw(
+    global_settings = "&[AppSettings::ColoredHelp, AppSettings::VersionlessSubcommands]"
+))]
+struct Opt {
+    #[structopt(short = "l", long = "level", raw(aliases = r#"&["set-level", "lvl"]"#))]
+    level: Vec<String>,
+}
+```
+
+Raw attributes were removed in 0.3. Now you can use any method from `App` and `Arg` *directly*:
+```rust
+#[derive(StructOpt)]
+#[structopt(global_settings(&[AppSettings::ColoredHelp, AppSettings::VersionlessSubcommands]))]
+struct Opt {
+    #[structopt(short = "l", long = "level", aliases(&["set-level", "lvl"]))]
+    level: Vec<String>,
+}
+```
+
+## Improvements
+
+### Support skipping struct fields
+Proposed by [@Morganamilo](https://github.com/Morganamilo) in ([#174](https://github.com/TeXitoi/structopt/issues/174))
+implemented by [@sphynx](https://github.com/sphynx) in ([#213](https://github.com/TeXitoi/structopt/issues/213)).
+
+Sometimes you want to include some fields in your `StructOpt` `struct` that are not options
+and `clap` should know nothing about them. In `structopt` 0.3 it's possible via the
+`#[structopt(skip)]` attribute. The field in question will be assigned with `Default::default()`
+value.
+
+```rust
+#[derive(StructOpt)]
+struct Opt {
+    #[structopt(short, long)]
+    speed: f32,
+
+    car: String,
+
+    // this field should not generate any arguments
+    #[structopt(skip)]
+    meta: Vec<u64>
+}
+```
+
+### Add optional feature to support `paw` by [@gameldar](https://github.com/gameldar) ([#187](https://github.com/TeXitoi/structopt/issues/187))
+
+### Significantly improve error reporting by [@CreepySkeleton](https://github.com/CreepySkeleton) ([#225](https://github.com/TeXitoi/structopt/pull/225/))
+Now (almost) every error message points to the location it originates from:
+
+```text
+error: default_value is meaningless for bool
+  --> $DIR/bool_default_value.rs:14:24
+   |
+14 |     #[structopt(short, default_value = true)]
+   |                        ^^^^^^^^^^^^^
+```
 
 # v0.2.16 (2019-05-29)
 
-* Support `Option<Option<T>>` type for fields by [@sphynx](https://github.com/sphynx)
-  ([#188](https://github.com/TeXitoi/structopt/issues/188))
+### Support optional options with optional argument, allowing `cmd [--opt[=value]]` by [@sphynx](https://github.com/sphynx) ([#188](https://github.com/TeXitoi/structopt/issues/188))
+Sometimes you want to represent an optional option that optionally takes an argument,
+i.e `[--opt[=value]]`. This is represented by `Option<Option<T>>`
+
+```rust
+#[derive(StructOpt)]
+struct Opt {
+  #[structopt(long)]
+  fruit: Option<Option<String>>,
+}
+
+fn main() {
+  assert_eq!(Opt::from_args(&["test"]), None);
+  assert_eq!(Opt::from_args(&["test", "--fruit"]), Some(None));
+  assert_eq!(Opt::from_args(&["test", "--fruit=apple"]), Some("apple"));
+}
+```
 
 # v0.2.15 (2019-03-08)
 

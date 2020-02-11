@@ -96,6 +96,8 @@ pretty_env_logger: MIT/Apache-2.0
 privdrop: ISC
 proc-macro2-0.4.30: MIT/Apache-2.0
 proc-macro2: MIT OR Apache-2.0
+proc-macro-error-attr: MIT OR Apache-2.0
+proc-macro-error: MIT OR Apache-2.0
 proc-macro-hack: MIT OR Apache-2.0
 profiler_builtins: License not found
 prost: Apache-2.0
@@ -168,9 +170,12 @@ sourcefile: Apache-2.0/MIT
 spin: MIT
 state: MIT/Apache-2.0
 strsim: MIT
+structopt-0.2.18: Apache-2.0/MIT
 structopt: Apache-2.0/MIT
+structopt-derive-0.2.18: Apache-2.0/MIT
 structopt-derive: Apache-2.0/MIT
 syn-0.15.44: MIT OR Apache-2.0
+syn-mid: Apache-2.0 OR MIT
 syn: MIT OR Apache-2.0
 synstructure: MIT
 tempfile: MIT OR Apache-2.0

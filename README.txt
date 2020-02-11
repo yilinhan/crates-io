@@ -91,6 +91,8 @@ petgraph                      0.5.0
 ppv-lite86                    0.2.6
 pretty_env_logger             0.2.5
 privdrop                      0.2.2
+proc-macro-error              0.4.8
+proc-macro-error-attr         0.4.8
 proc-macro-hack               0.5.11
 proc-macro2                   0.4.30
 proc-macro2                   1.0.8
@@ -145,9 +147,12 @@ spin                          0.5.2
 state                         0.4.1
 strsim                        0.8.0
 structopt                     0.2.18
+structopt                     0.3.9
 structopt-derive              0.2.18
+structopt-derive              0.4.2
 syn                           0.15.44
 syn                           1.0.14
+syn-mid                       0.5.0
 synstructure                  0.12.3
 tempfile                      3.1.0
 termcolor                     1.1.0

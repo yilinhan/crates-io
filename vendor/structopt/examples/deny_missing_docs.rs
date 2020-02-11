@@ -13,15 +13,12 @@
 
 #![deny(missing_docs)]
 
-#[macro_use]
-extern crate structopt;
-
 use structopt::StructOpt;
 
 /// The options
 #[derive(StructOpt, Debug, PartialEq)]
 pub struct Opt {
-    #[structopt(short = "v")]
+    #[structopt(short)]
     verbose: bool,
     #[structopt(subcommand)]
     cmd: Option<Cmd>,
@@ -35,7 +32,7 @@ pub enum Cmd {
     /// command B
     B {
         /// Alice?
-        #[structopt(short = "a")]
+        #[structopt(short)]
         alice: bool,
     },
     /// command C
@@ -45,7 +42,7 @@ pub enum Cmd {
 /// The options for C
 #[derive(StructOpt, Debug, PartialEq)]
 pub struct COpt {
-    #[structopt(short = "b")]
+    #[structopt(short)]
     bob: bool,
 }
 

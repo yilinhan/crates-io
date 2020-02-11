@@ -6,23 +6,26 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[macro_use]
-extern crate structopt;
+use structopt::StructOpt;
 
 mod options {
+    use super::StructOpt;
+
     #[derive(Debug, StructOpt)]
     pub struct Options {
         #[structopt(subcommand)]
-        pub subcommand: ::subcommands::SubCommand,
+        pub subcommand: super::subcommands::SubCommand,
     }
 }
 
 mod subcommands {
+    use super::StructOpt;
+
     #[derive(Debug, StructOpt)]
     pub enum SubCommand {
-        #[structopt(name = "foo", about = "foo")]
+        /// foo
         Foo {
-            #[structopt(help = "foo")]
+            /// foo
             bars: Vec<String>,
         },
     }

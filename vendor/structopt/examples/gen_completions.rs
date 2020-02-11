@@ -6,17 +6,14 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
-#[macro_use]
-extern crate structopt;
-
 use structopt::clap::Shell;
 use structopt::StructOpt;
 
 #[derive(StructOpt, Debug)]
-#[structopt(name = "example", about = "An example of StructOpt usage.")]
+/// An example of how to generate bash completions with structopt.
 struct Opt {
-    /// A flag, true if used in the command line.
-    #[structopt(short = "d", long = "debug", help = "Activate debug mode")]
+    #[structopt(short, long)]
+    /// Activate debug mode
     debug: bool,
 }
 

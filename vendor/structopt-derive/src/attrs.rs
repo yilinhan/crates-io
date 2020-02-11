@@ -6,51 +6,48 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 
+use crate::doc_comments::process_doc_comment;
+use crate::{parse::*, spanned::Sp, ty::Ty};
+
+use std::env;
+
 use heck::{CamelCase, KebabCase, MixedCase, ShoutySnakeCase, SnakeCase};
 use proc_macro2::{Span, TokenStream};
-use std::{env, mem};
-use syn::Type::Path;
+use proc_macro_error::abort;
+use quote::{quote, quote_spanned, ToTokens};
 use syn::{
-    self, AngleBracketedGenericArguments, Attribute, GenericArgument, Ident, LitStr, MetaList,
-    MetaNameValue, PathArguments, PathSegment, TypePath,
+    self, ext::IdentExt, spanned::Spanned, Attribute, Expr, Ident, LitStr, MetaNameValue, Type,
 };
 
-#[derive(Copy, Clone, PartialEq, Debug)]
+#[derive(Clone)]
 pub enum Kind {
-    Arg(Ty),
-    Subcommand(Ty),
-    FlattenStruct,
+    Arg(Sp<Ty>),
+    Subcommand(Sp<Ty>),
+    ExternalSubcommand,
+    Flatten,
+    Skip(Option<Expr>),
 }
-#[derive(Copy, Clone, PartialEq, Debug)]
-pub enum Ty {
-    Bool,
-    Vec,
-    Option,
-    OptionOption,
-    Other,
-}
-#[derive(Debug)]
-pub struct Attrs {
-    name: String,
-    cased_name: String,
-    casing: CasingStyle,
-    methods: Vec<Method>,
-    parser: (Parser, TokenStream),
-    has_custom_parser: bool,
-    kind: Kind,
-}
-#[derive(Debug)]
-struct Method {
-    name: String,
+
+#[derive(Clone)]
+pub struct Method {
+    name: Ident,
     args: TokenStream,
 }
-#[derive(Debug, PartialEq)]
-pub enum Parser {
+
+#[derive(Clone)]
+pub struct Parser {
+    pub kind: Sp<ParserKind>,
+    pub func: TokenStream,
+}
+
+#[derive(Debug, PartialEq, Clone)]
+pub enum ParserKind {
     FromStr,
     TryFromStr,
     FromOsStr,
     TryFromOsStr,
     FromOccurrences,
+    FromFlag,
 }
 
 /// Defines the casing for the attributes long representation.
@@ -70,469 +67,600 @@ pub enum CasingStyle {
     Verbatim,
 }
 
-impl ::std::str::FromStr for Parser {
-    type Err = String;
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "from_str" => Ok(Parser::FromStr),
-            "try_from_str" => Ok(Parser::TryFromStr),
-            "from_os_str" => Ok(Parser::FromOsStr),
-            "try_from_os_str" => Ok(Parser::TryFromOsStr),
-            "from_occurrences" => Ok(Parser::FromOccurrences),
-            _ => Err(format!("unsupported parser {}", s)),
+#[derive(Clone)]
+pub enum Name {
+    Derived(Ident),
+    Assigned(TokenStream),
+}
+
+#[derive(Clone)]
+pub struct Attrs {
+    name: Name,
+    casing: Sp<CasingStyle>,
+    env_casing: Sp<CasingStyle>,
+    ty: Option<Type>,
+    doc_comment: Vec<Method>,
+    methods: Vec<Method>,
+    parser: Sp<Parser>,
+    author: Option<Method>,
+    about: Option<Method>,
+    version: Option<Method>,
+    no_version: Option<Ident>,
+    verbatim_doc_comment: Option<Ident>,
+    has_custom_parser: bool,
+    kind: Sp<Kind>,
+}
+
+impl Method {
+    pub fn new(name: Ident, args: TokenStream) -> Self {
+        Method { name, args }
+    }
+
+    fn from_lit_or_env(ident: Ident, lit: Option<LitStr>, env_var: &str) -> Option<Self> {
+        let mut lit = match lit {
+            Some(lit) => lit,
+
+            None => match env::var(env_var) {
+                Ok(val) => LitStr::new(&val, ident.span()),
+                Err(_) => {
+                    abort!(ident,
+                        "cannot derive `{}` from Cargo.toml", ident;
+                        note = "`{}` environment variable is not set", env_var;
+                        help = "use `{} = \"...\"` to set {} manually", ident, ident;
+                    );
+                }
+            },
+        };
+
+        if ident == "author" {
+            let edited = process_author_str(&lit.value());
+            lit = LitStr::new(&edited, lit.span());
         }
+
+        Some(Method::new(ident, quote!(#lit)))
+    }
+}
+
+impl ToTokens for Method {
+    fn to_tokens(&self, ts: &mut TokenStream) {
+        let Method { ref name, ref args } = self;
+        quote!(.#name(#args)).to_tokens(ts);
+    }
+}
+
+impl Parser {
+    fn default_spanned(span: Span) -> Sp<Self> {
+        let kind = Sp::new(ParserKind::TryFromStr, span);
+        let func = quote_spanned!(span=> ::std::str::FromStr::from_str);
+        Sp::new(Parser { kind, func }, span)
+    }
+
+    fn from_spec(parse_ident: Ident, spec: ParserSpec) -> Sp<Self> {
+        use ParserKind::*;
+
+        let kind = match &*spec.kind.to_string() {
+            "from_str" => FromStr,
+            "try_from_str" => TryFromStr,
+            "from_os_str" => FromOsStr,
+            "try_from_os_str" => TryFromOsStr,
+            "from_occurrences" => FromOccurrences,
+            "from_flag" => FromFlag,
+            s => abort!(spec.kind, "unsupported parser `{}`", s),
+        };
+
+        let func = match spec.parse_func {
+            None => match kind {
+                FromStr | FromOsStr => {
+                    quote_spanned!(spec.kind.span()=> ::std::convert::From::from)
+                }
+                TryFromStr => quote_spanned!(spec.kind.span()=> ::std::str::FromStr::from_str),
+                TryFromOsStr => abort!(
+                    spec.kind,
+                    "you must set parser for `try_from_os_str` explicitly"
+                ),
+                FromOccurrences => quote_spanned!(spec.kind.span()=> { |v| v as _ }),
+                FromFlag => quote_spanned!(spec.kind.span()=> ::std::convert::From::from),
+            },
+
+            Some(func) => match func {
+                syn::Expr::Path(_) => quote!(#func),
+                _ => abort!(func, "`parse` argument must be a function path"),
+            },
+        };
+
+        let kind = Sp::new(kind, spec.kind.span());
+        let parser = Parser { kind, func };
+        Sp::new(parser, parse_ident.span())
     }
 }
 
 impl CasingStyle {
-    fn translate(self, input: &str) -> String {
-        match self {
-            CasingStyle::Pascal => input.to_camel_case(),
-            CasingStyle::Kebab => input.to_kebab_case(),
-            CasingStyle::Camel => input.to_mixed_case(),
-            CasingStyle::ScreamingSnake => input.to_shouty_snake_case(),
-            CasingStyle::Snake => input.to_snake_case(),
-            CasingStyle::Verbatim => String::from(input),
+    fn from_lit(name: LitStr) -> Sp<Self> {
+        use CasingStyle::*;
+
+        let normalized = name.value().to_camel_case().to_lowercase();
+        let cs = |kind| Sp::new(kind, name.span());
+
+        match normalized.as_ref() {
+            "camel" | "camelcase" => cs(Camel),
+            "kebab" | "kebabcase" => cs(Kebab),
+            "pascal" | "pascalcase" => cs(Pascal),
+            "screamingsnake" | "screamingsnakecase" => cs(ScreamingSnake),
+            "snake" | "snakecase" => cs(Snake),
+            "verbatim" | "verbatimcase" => cs(Verbatim),
+            s => abort!(name, "unsupported casing: `{}`", s),
         }
     }
 }
 
-impl ::std::str::FromStr for CasingStyle {
-    type Err = String;
+impl Name {
+    pub fn translate(self, style: CasingStyle) -> TokenStream {
+        use CasingStyle::*;
 
-    fn from_str(name: &str) -> Result<Self, Self::Err> {
-        let name = name.to_camel_case().to_lowercase();
-
-        let case = match name.as_ref() {
-            "camel" | "camelcase" => CasingStyle::Camel,
-            "kebab" | "kebabcase" => CasingStyle::Kebab,
-            "pascal" | "pascalcase" => CasingStyle::Pascal,
-            "screamingsnake" | "screamingsnakecase" => CasingStyle::ScreamingSnake,
-            "snake" | "snakecase" => CasingStyle::Snake,
-            "verbatim" | "verbatimcase" => CasingStyle::Verbatim,
-            _ => return Err(format!("unsupported casing: {}", name)),
-        };
-
-        Ok(case)
+        match self {
+            Name::Assigned(tokens) => tokens,
+            Name::Derived(ident) => {
+                let s = ident.unraw().to_string();
+                let s = match style {
+                    Pascal => s.to_camel_case(),
+                    Kebab => s.to_kebab_case(),
+                    Camel => s.to_mixed_case(),
+                    ScreamingSnake => s.to_shouty_snake_case(),
+                    Snake => s.to_snake_case(),
+                    Verbatim => s,
+                };
+                quote_spanned!(ident.span()=> #s)
+            }
+        }
     }
 }
 
 impl Attrs {
-    fn new(name: String, casing: CasingStyle) -> Attrs {
-        let cased_name = casing.translate(&name);
+    fn new(
+        default_span: Span,
+        name: Name,
+        parent_attrs: Option<&Attrs>,
+        ty: Option<Type>,
+        casing: Sp<CasingStyle>,
+        env_casing: Sp<CasingStyle>,
+    ) -> Self {
+        let no_version = parent_attrs
+            .as_ref()
+            .map(|attrs| attrs.no_version.clone())
+            .unwrap_or(None);
 
-        Attrs {
+        Self {
             name,
-            cased_name,
+            ty,
             casing,
+            env_casing,
+            doc_comment: vec![],
             methods: vec![],
-            parser: (Parser::TryFromStr, quote!(::std::str::FromStr::from_str)),
+            parser: Parser::default_spanned(default_span),
+            about: None,
+            author: None,
+            version: None,
+            no_version,
+            verbatim_doc_comment: None,
+
             has_custom_parser: false,
-            kind: Kind::Arg(Ty::Other),
+            kind: Sp::new(Kind::Arg(Sp::new(Ty::Other, default_span)), default_span),
         }
     }
-    fn push_str_method(&mut self, name: &str, arg: &str) {
-        match (name, arg) {
-            ("about", "") | ("version", "") | ("author", "") => {
-                let methods = mem::replace(&mut self.methods, vec![]);
-                self.methods = methods.into_iter().filter(|m| m.name != name).collect();
-            }
-            ("name", new_name) => {
-                self.name = new_name.into();
-                self.cased_name = self.casing.translate(new_name);
-            }
-            (name, arg) => self.methods.push(Method {
-                name: name.to_string(),
-                args: quote!(#arg),
-            }),
+
+    fn push_method(&mut self, name: Ident, arg: impl ToTokens) {
+        if name == "name" {
+            self.name = Name::Assigned(quote!(#arg));
+        } else if name == "version" {
+            self.version = Some(Method::new(name, quote!(#arg)));
+        } else {
+            self.methods.push(Method::new(name, quote!(#arg)))
         }
     }
+
     fn push_attrs(&mut self, attrs: &[Attribute]) {
-        use Lit::*;
-        use Meta::*;
-        use NestedMeta::*;
+        use crate::parse::StructOptAttr::*;
 
-        let structopt_attrs =
-            attrs
-                .iter()
-                .filter_map(|attr| {
-                    let path = &attr.path;
-                    match quote!(#path).to_string().as_ref() {
-                        "structopt" => Some(attr.interpret_meta().unwrap_or_else(|| {
-                            panic!("invalid structopt syntax: {}", quote!(#attr))
-                        })),
-                        _ => None,
-                    }
-                })
-                .flat_map(|m| match m {
-                    List(l) => l.nested,
-                    tokens => panic!("unsupported syntax: {}", quote!(#tokens).to_string()),
-                })
-                .map(|m| match m {
-                    Meta(m) => m,
-                    ref tokens => panic!("unsupported syntax: {}", quote!(#tokens).to_string()),
-                });
-
-        for attr in structopt_attrs {
+        for attr in parse_structopt_attributes(attrs) {
             match attr {
-                NameValue(MetaNameValue {
-                    ref ident,
-                    lit: Str(ref value),
-                    ..
-                }) if ident == "rename_all" => {
-                    self.casing = {
-                        let input = value.value();
-                        ::std::str::FromStr::from_str(&input)
-                            .unwrap_or_else(|error| panic!("{}", error))
-                    };
-                    self.cased_name = self.casing.translate(&self.name);
+                Short(ident) | Long(ident) => {
+                    self.push_method(ident, self.name.clone().translate(*self.casing));
                 }
-                NameValue(MetaNameValue {
-                    ident,
-                    lit: Str(value),
-                    ..
-                }) => self.push_str_method(&ident.to_string(), &value.value()),
-                NameValue(MetaNameValue { ident, lit, .. }) => self.methods.push(Method {
-                    name: ident.to_string(),
-                    args: quote!(#lit),
-                }),
-                List(MetaList {
-                    ref ident,
-                    ref nested,
-                    ..
-                }) if ident == "parse" => {
-                    if nested.len() != 1 {
-                        panic!("parse must have exactly one argument");
-                    }
-                    self.has_custom_parser = true;
-                    self.parser = match nested[0] {
-                        Meta(NameValue(MetaNameValue {
-                            ref ident,
-                            lit: Str(ref v),
-                            ..
-                        })) => {
-                            let function: syn::Path = v.parse().expect("parser function path");
-                            let parser = ident.to_string().parse().unwrap();
-                            (parser, quote!(#function))
-                        }
-                        Meta(Word(ref i)) => {
-                            use Parser::*;
-                            let parser = i.to_string().parse().unwrap();
-                            let function = match parser {
-                                FromStr => quote!(::std::convert::From::from),
-                                TryFromStr => quote!(::std::str::FromStr::from_str),
-                                FromOsStr => quote!(::std::convert::From::from),
-                                TryFromOsStr => panic!(
-                                    "cannot omit parser function name with `try_from_os_str`"
-                                ),
-                                FromOccurrences => quote!({ |v| v as _ }),
-                            };
-                            (parser, function)
-                        }
-                        ref l => panic!("unknown value parser specification: {}", quote!(#l)),
-                    };
+
+                Env(ident) => {
+                    self.push_method(ident, self.name.clone().translate(*self.env_casing));
                 }
-                List(MetaList {
-                    ref ident,
-                    ref nested,
-                    ..
-                }) if ident == "raw" => {
-                    for method in nested {
-                        match *method {
-                            Meta(NameValue(MetaNameValue {
-                                ref ident,
-                                lit: Str(ref v),
-                                ..
-                            })) => self.push_raw_method(&ident.to_string(), v),
-                            ref mi => panic!("unsupported raw entry: {}", quote!(#mi)),
-                        }
-                    }
+
+                Subcommand(ident) => {
+                    let ty = Sp::call_site(Ty::Other);
+                    let kind = Sp::new(Kind::Subcommand(ty), ident.span());
+                    self.set_kind(kind);
                 }
-                Word(ref w) if w == "subcommand" => {
-                    self.set_kind(Kind::Subcommand(Ty::Other));
+
+                ExternalSubcommand(ident) => {
+                    self.kind = Sp::new(Kind::ExternalSubcommand, ident.span());
                 }
-                Word(ref w) if w == "flatten" => {
-                    self.set_kind(Kind::FlattenStruct);
+
+                Flatten(ident) => {
+                    let kind = Sp::new(Kind::Flatten, ident.span());
+                    self.set_kind(kind);
                 }
-                Word(ref w) if w == "long" => {
-                    let cased_name = &self.cased_name.clone();
-                    self.push_str_method("long", cased_name);
+
+                Skip(ident, expr) => {
+                    let kind = Sp::new(Kind::Skip(expr), ident.span());
+                    self.set_kind(kind);
                 }
-                Word(ref w) if w == "short" => {
-                    let cased_named = &self.cased_name.clone();
-                    self.push_str_method("short", cased_named);
-                }
-                ref i @ List(..) | ref i @ Word(..) => panic!("unsupported option: {}", quote!(#i)),
-            }
-        }
-    }
-    fn push_raw_method(&mut self, name: &str, args: &LitStr) {
-        let ts: TokenStream = args.value().parse().unwrap_or_else(|_| {
-            panic!(
-                "bad parameter {} = {}: the parameter must be valid rust code",
-                name,
-                quote!(#args)
-            )
-        });
-        self.methods.push(Method {
-            name: name.to_string(),
-            args: quote!(#(#ts)*),
-        })
-    }
-    fn push_doc_comment(&mut self, attrs: &[Attribute], name: &str) {
-        let doc_comments = attrs
-            .iter()
-            .filter_map(|attr| {
-                let path = &attr.path;
-                if quote!(#path).to_string() == "doc" {
-                    attr.interpret_meta()
-                } else {
-                    None
-                }
-            })
-            .filter_map(|attr| {
-                use Lit::*;
-                use Meta::*;
-                if let NameValue(MetaNameValue {
-                    ident, lit: Str(s), ..
-                }) = attr
-                {
-                    if ident != "doc" {
-                        return None;
-                    }
-                    let value = s.value();
-                    let text = value
-                        .trim_left_matches("//!")
-                        .trim_left_matches("///")
-                        .trim_left_matches("/*!")
-                        .trim_left_matches("/**")
-                        .trim_right_matches("*/")
-                        .trim();
-                    if text.is_empty() {
-                        Some("\n\n".to_string())
+
+                NoVersion(ident) => self.no_version = Some(ident),
+
+                VerbatimDocComment(ident) => self.verbatim_doc_comment = Some(ident),
+
+                DefaultValue(ident, lit) => {
+                    let val = if let Some(lit) = lit {
+                        quote!(#lit)
                     } else {
-                        Some(text.to_string())
-                    }
+                        let ty = if let Some(ty) = self.ty.as_ref() {
+                            ty
+                        } else {
+                            abort!(
+                                ident,
+                                "#[structopt(default_value)] (without an argument) can be used \
+                                only on field level";
+
+                                note = "see \
+                                    https://docs.rs/structopt/0.3.5/structopt/#magical-methods")
+                        };
+
+                        quote_spanned!(ident.span()=> {
+                            ::structopt::lazy_static::lazy_static! {
+                                static ref DEFAULT_VALUE: &'static str = {
+                                    let val = <#ty as ::std::default::Default>::default();
+                                    let s = ::std::string::ToString::to_string(&val);
+                                    ::std::boxed::Box::leak(s.into_boxed_str())
+                                };
+                            }
+                            *DEFAULT_VALUE
+                        })
+                    };
+
+                    self.methods.push(Method::new(ident, val));
+                }
+
+                About(ident, about) => {
+                    self.about = Method::from_lit_or_env(ident, about, "CARGO_PKG_DESCRIPTION");
+                }
+
+                Author(ident, author) => {
+                    self.author = Method::from_lit_or_env(ident, author, "CARGO_PKG_AUTHORS");
+                }
+
+                Version(ident, version) => {
+                    self.push_method(ident, version);
+                }
+
+                NameLitStr(name, lit) => {
+                    self.push_method(name, lit);
+                }
+
+                NameExpr(name, expr) => {
+                    self.push_method(name, expr);
+                }
+
+                MethodCall(name, args) => self.push_method(name, quote!(#(#args),*)),
+
+                RenameAll(_, casing_lit) => {
+                    self.casing = CasingStyle::from_lit(casing_lit);
+                }
+
+                RenameAllEnv(_, casing_lit) => {
+                    self.env_casing = CasingStyle::from_lit(casing_lit);
+                }
+
+                Parse(ident, spec) => {
+                    self.has_custom_parser = true;
+                    self.parser = Parser::from_spec(ident, spec);
+                }
+            }
+        }
+    }
+
+    fn push_doc_comment(&mut self, attrs: &[Attribute], name: &str) {
+        use crate::Lit::*;
+        use crate::Meta::*;
+
+        let comment_parts: Vec<_> = attrs
+            .iter()
+            .filter(|attr| attr.path.is_ident("doc"))
+            .filter_map(|attr| {
+                if let Ok(NameValue(MetaNameValue { lit: Str(s), .. })) = attr.parse_meta() {
+                    Some(s.value())
                 } else {
+                    // non #[doc = "..."] attributes are not our concern
+                    // we leave them for rustc to handle
                     None
                 }
             })
-            .collect::<Vec<_>>();
+            .collect();
 
-        if doc_comments.is_empty() {
-            return;
-        }
-
-        let merged_lines = doc_comments
-            .join(" ")
-            .split('\n')
-            .map(str::trim)
-            .map(str::to_string)
-            .collect::<Vec<_>>()
-            .join("\n");
-
-        let expected_doc_comment_split = if let Some(content) = doc_comments.get(1) {
-            (doc_comments.len() > 2) && (content == "\n\n")
-        } else {
-            false
-        };
-
-        if expected_doc_comment_split {
-            let long_name = String::from("long_") + name;
-
-            self.methods.push(Method {
-                name: long_name,
-                args: quote!(#merged_lines),
-            });
-
-            // Remove trailing whitespace and period from short help, as rustdoc
-            // best practice is to use complete sentences, but command-line help
-            // typically omits the trailing period.
-            let short_arg = doc_comments
-                .first()
-                .map(String::as_ref)
-                .map(str::trim)
-                .map(|s| s.trim_right_matches('.'))
-                .unwrap_or("");
-
-            self.methods.push(Method {
-                name: name.to_string(),
-                args: quote!(#short_arg),
-            });
-        } else {
-            self.methods.push(Method {
-                name: name.to_string(),
-                args: quote!(#merged_lines),
-            });
-        }
+        self.doc_comment =
+            process_doc_comment(comment_parts, name, self.verbatim_doc_comment.is_none());
     }
-    pub fn from_struct(attrs: &[Attribute], name: String, argument_casing: CasingStyle) -> Attrs {
-        let mut res = Self::new(name, argument_casing);
-        let attrs_with_env = [
-            ("version", "CARGO_PKG_VERSION"),
-            ("about", "CARGO_PKG_DESCRIPTION"),
-            ("author", "CARGO_PKG_AUTHORS"),
-        ];
-        attrs_with_env
-            .iter()
-            .filter_map(|&(m, v)| env::var(v).ok().and_then(|arg| Some((m, arg))))
-            .filter(|&(_, ref arg)| !arg.is_empty())
-            .for_each(|(name, arg)| {
-                let new_arg = if name == "author" {
-                    arg.replace(":", ", ")
-                } else {
-                    arg
-                };
-                res.push_str_method(name, &new_arg);
-            });
-        res.push_doc_comment(attrs, "about");
+
+    pub fn from_struct(
+        span: Span,
+        attrs: &[Attribute],
+        name: Name,
+        parent_attrs: Option<&Attrs>,
+        argument_casing: Sp<CasingStyle>,
+        env_casing: Sp<CasingStyle>,
+    ) -> Self {
+        let mut res = Self::new(span, name, parent_attrs, None, argument_casing, env_casing);
         res.push_attrs(attrs);
-        if res.has_custom_parser {
-            panic!("parse attribute is only allowed on fields");
-        }
-        match res.kind {
-            Kind::Subcommand(_) => panic!("subcommand is only allowed on fields"),
-            Kind::FlattenStruct => panic!("flatten is only allowed on fields"),
-            Kind::Arg(_) => res,
-        }
-    }
-    fn ty_from_field(ty: &syn::Type) -> Ty {
-        if let Path(TypePath {
-            path: syn::Path { ref segments, .. },
-            ..
-        }) = *ty
-        {
-            match segments.iter().last().unwrap().ident.to_string().as_str() {
-                "bool" => Ty::Bool,
-                "Option" => match sub_type(ty).map(Attrs::ty_from_field) {
-                    Some(Ty::Option) => Ty::OptionOption,
-                    _ => Ty::Option,
-                },
-                "Vec" => Ty::Vec,
-                _ => Ty::Other,
-            }
-        } else {
-            Ty::Other
-        }
-    }
-    pub fn from_field(field: &syn::Field, struct_casing: CasingStyle) -> Attrs {
-        let name = field.ident.as_ref().unwrap().to_string();
-        let mut res = Self::new(name, struct_casing);
-        res.push_doc_comment(&field.attrs, "help");
-        res.push_attrs(&field.attrs);
+        res.push_doc_comment(attrs, "about");
 
-        match res.kind {
-            Kind::FlattenStruct => {
+        if res.has_custom_parser {
+            abort!(
+                res.parser.span(),
+                "`parse` attribute is only allowed on fields"
+            );
+        }
+        match &*res.kind {
+            Kind::Subcommand(_) => abort!(res.kind.span(), "subcommand is only allowed on fields"),
+            Kind::Skip(_) => abort!(res.kind.span(), "skip is only allowed on fields"),
+            Kind::Arg(_) | Kind::ExternalSubcommand | Kind::Flatten => res,
+        }
+    }
+
+    pub fn from_field(
+        field: &syn::Field,
+        parent_attrs: Option<&Attrs>,
+        struct_casing: Sp<CasingStyle>,
+        env_casing: Sp<CasingStyle>,
+    ) -> Self {
+        let name = field.ident.clone().unwrap();
+        let mut res = Self::new(
+            field.span(),
+            Name::Derived(name),
+            parent_attrs,
+            Some(field.ty.clone()),
+            struct_casing,
+            env_casing,
+        );
+        res.push_attrs(&field.attrs);
+        res.push_doc_comment(&field.attrs, "help");
+
+        match &*res.kind {
+            Kind::Flatten => {
                 if res.has_custom_parser {
-                    panic!("parse attribute is not allowed for flattened entry");
+                    abort!(
+                        res.parser.span(),
+                        "parse attribute is not allowed for flattened entry"
+                    );
                 }
-                if !res.methods.is_empty() {
-                    panic!("methods and doc comments are not allowed for flattened entry");
+                if res.has_explicit_methods() || res.has_doc_methods() {
+                    abort!(
+                        res.kind.span(),
+                        "methods and doc comments are not allowed for flattened entry"
+                    );
                 }
             }
+
+            Kind::ExternalSubcommand => {}
+
             Kind::Subcommand(_) => {
                 if res.has_custom_parser {
-                    panic!("parse attribute is not allowed for subcommand");
+                    abort!(
+                        res.parser.span(),
+                        "parse attribute is not allowed for subcommand"
+                    );
                 }
-                if !res.methods.iter().all(|m| m.name == "help") {
-                    panic!("methods in attributes is not allowed for subcommand");
+                if res.has_explicit_methods() {
+                    abort!(
+                        res.kind.span(),
+                        "methods in attributes are not allowed for subcommand"
+                    );
                 }
-                let ty = Self::ty_from_field(&field.ty);
-                if ty == Ty::OptionOption {
-                    panic!("Option<Option<T>> type is not allowed for subcommand")
-                }
-                res.kind = Kind::Subcommand(ty);
-            }
-            Kind::Arg(_) => {
-                let mut ty = Self::ty_from_field(&field.ty);
-                if res.has_custom_parser {
-                    match ty {
-                        Ty::Option | Ty::Vec => (),
-                        _ => ty = Ty::Other,
-                    }
-                }
-                match ty {
-                    Ty::Bool => {
-                        if res.has_method("default_value") {
-                            panic!("default_value is meaningless for bool")
-                        }
-                        if res.has_method("required") {
-                            panic!("required is meaningless for bool")
-                        }
-                    }
-                    Ty::Option => {
-                        if res.has_method("default_value") {
-                            panic!("default_value is meaningless for Option")
-                        }
-                        if res.has_method("required") {
-                            panic!("required is meaningless for Option")
-                        }
-                    }
+
+                let ty = Ty::from_syn_ty(&field.ty);
+                match *ty {
                     Ty::OptionOption => {
-                        // If it's a positional argument.
-                        if !(res.has_method("long") || res.has_method("short")) {
-                            panic!("Option<Option<T>> type is meaningless for positional argument")
-                        }
+                        abort!(
+                            field.ty,
+                            "Option<Option<T>> type is not allowed for subcommand"
+                        );
+                    }
+                    Ty::OptionVec => {
+                        abort!(
+                            field.ty,
+                            "Option<Vec<T>> type is not allowed for subcommand"
+                        );
                     }
                     _ => (),
                 }
-                res.kind = Kind::Arg(ty);
+
+                res.kind = Sp::new(Kind::Subcommand(ty), res.kind.span());
+            }
+            Kind::Skip(_) => {
+                if res.has_explicit_methods() {
+                    abort!(
+                        res.kind.span(),
+                        "methods are not allowed for skipped fields"
+                    );
+                }
+            }
+            Kind::Arg(orig_ty) => {
+                let mut ty = Ty::from_syn_ty(&field.ty);
+                if res.has_custom_parser {
+                    match *ty {
+                        Ty::Option | Ty::Vec | Ty::OptionVec => (),
+                        _ => ty = Sp::new(Ty::Other, ty.span()),
+                    }
+                }
+
+                match *ty {
+                    Ty::Bool => {
+                        if res.is_positional() && !res.has_custom_parser {
+                            abort!(field.ty,
+                                "`bool` cannot be used as positional parameter with default parser";
+                                help = "if you want to create a flag add `long` or `short`";
+                                help = "If you really want a boolean parameter \
+                                    add an explicit parser, for example `parse(try_from_str)`";
+                                note = "see also https://github.com/TeXitoi/structopt/tree/master/examples/true_or_false.rs";
+                            )
+                        }
+                        if let Some(m) = res.find_method("default_value") {
+                            abort!(m.name, "default_value is meaningless for bool")
+                        }
+                        if let Some(m) = res.find_method("required") {
+                            abort!(m.name, "required is meaningless for bool")
+                        }
+                    }
+                    Ty::Option => {
+                        if let Some(m) = res.find_method("default_value") {
+                            abort!(m.name, "default_value is meaningless for Option")
+                        }
+                        if let Some(m) = res.find_method("required") {
+                            abort!(m.name, "required is meaningless for Option")
+                        }
+                    }
+                    Ty::OptionOption => {
+                        if res.is_positional() {
+                            abort!(
+                                field.ty,
+                                "Option<Option<T>> type is meaningless for positional argument"
+                            )
+                        }
+                    }
+                    Ty::OptionVec => {
+                        if res.is_positional() {
+                            abort!(
+                                field.ty,
+                                "Option<Vec<T>> type is meaningless for positional argument"
+                            )
+                        }
+                    }
+
+                    _ => (),
+                }
+                res.kind = Sp::new(Kind::Arg(ty), orig_ty.span());
             }
         }
 
         res
     }
-    fn set_kind(&mut self, kind: Kind) {
-        if let Kind::Arg(_) = self.kind {
+
+    fn set_kind(&mut self, kind: Sp<Kind>) {
+        if let Kind::Arg(_) = *self.kind {
             self.kind = kind;
         } else {
-            panic!("subcommands cannot be flattened");
+            abort!(
+                kind.span(),
+                "subcommand, flatten and skip cannot be used together"
+            );
         }
     }
-    pub fn has_method(&self, method: &str) -> bool {
-        self.methods.iter().any(|m| m.name == method)
+
+    pub fn has_method(&self, name: &str) -> bool {
+        self.find_method(name).is_some()
     }
-    pub fn methods(&self) -> TokenStream {
-        let methods = self.methods.iter().map(|&Method { ref name, ref args }| {
-            let name = Ident::new(&name, Span::call_site());
-            quote!( .#name(#args) )
-        });
-        quote!( #(#methods)* )
+
+    pub fn find_method(&self, name: &str) -> Option<&Method> {
+        self.methods.iter().find(|m| m.name == name)
     }
-    pub fn cased_name(&self) -> &str {
-        &self.cased_name
+
+    /// generate methods from attributes on top of struct or enum
+    pub fn top_level_methods(&self) -> TokenStream {
+        let author = &self.author;
+        let about = &self.about;
+        let methods = &self.methods;
+        let doc_comment = &self.doc_comment;
+
+        quote!( #(#doc_comment)* #author #about #(#methods)*  )
     }
-    pub fn parser(&self) -> &(Parser, TokenStream) {
+
+    /// generate methods on top of a field
+    pub fn field_methods(&self) -> TokenStream {
+        let methods = &self.methods;
+        let doc_comment = &self.doc_comment;
+        quote!( #(#doc_comment)* #(#methods)* )
+    }
+
+    pub fn version(&self) -> TokenStream {
+        match (&self.no_version, &self.version) {
+            (None, Some(m)) => m.to_token_stream(),
+
+            (None, None) => std::env::var("CARGO_PKG_VERSION")
+                .map(|version| quote!( .version(#version) ))
+                .unwrap_or_default(),
+
+            _ => quote!(),
+        }
+    }
+
+    pub fn cased_name(&self) -> TokenStream {
+        self.name.clone().translate(*self.casing)
+    }
+
+    pub fn parser(&self) -> &Sp<Parser> {
         &self.parser
     }
-    pub fn kind(&self) -> Kind {
-        self.kind
+
+    pub fn kind(&self) -> Sp<Kind> {
+        self.kind.clone()
     }
-    pub fn casing(&self) -> CasingStyle {
-        self.casing
+
+    pub fn casing(&self) -> Sp<CasingStyle> {
+        self.casing.clone()
+    }
+
+    pub fn env_casing(&self) -> Sp<CasingStyle> {
+        self.env_casing.clone()
+    }
+
+    pub fn is_positional(&self) -> bool {
+        self.methods
+            .iter()
+            .all(|m| m.name != "long" && m.name != "short")
+    }
+
+    pub fn has_explicit_methods(&self) -> bool {
+        self.methods
+            .iter()
+            .any(|m| m.name != "help" && m.name != "long_help")
+    }
+
+    pub fn has_doc_methods(&self) -> bool {
+        !self.doc_comment.is_empty()
+            || self.methods.iter().any(|m| {
+                m.name == "help"
+                    || m.name == "long_help"
+                    || m.name == "about"
+                    || m.name == "long_about"
+            })
     }
 }
 
-pub fn sub_type(t: &syn::Type) -> Option<&syn::Type> {
-    let segs = match *t {
-        syn::Type::Path(TypePath {
-            path: syn::Path { ref segments, .. },
-            ..
-        }) => segments,
-        _ => return None,
-    };
-    match *segs.iter().last().unwrap() {
-        PathSegment {
-            arguments:
-                PathArguments::AngleBracketed(AngleBracketedGenericArguments { ref args, .. }),
-            ..
-        } if args.len() == 1 => {
-            if let GenericArgument::Type(ref ty) = args[0] {
-                Some(ty)
-            } else {
-                None
-            }
+/// replace all `:` with `, ` when not inside the `<>`
+///
+/// `"author1:author2:author3" => "author1, author2, author3"`
+/// `"author1 <http://website1.com>:author2" => "author1 <http://website1.com>, author2"
+fn process_author_str(author: &str) -> String {
+    let mut res = String::with_capacity(author.len());
+    let mut inside_angle_braces = 0usize;
+
+    for ch in author.chars() {
+        if inside_angle_braces > 0 && ch == '>' {
+            inside_angle_braces -= 1;
+            res.push(ch);
+        } else if ch == '<' {
+            inside_angle_braces += 1;
+            res.push(ch);
+        } else if inside_angle_braces == 0 && ch == ':' {
+            res.push_str(", ");
+        } else {
+            res.push(ch);
         }
-        _ => None,
     }
+
+    res
 }

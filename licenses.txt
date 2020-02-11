@@ -160,6 +160,7 @@ sgx_tseal: see license file at sgx_tseal/LICENSE
 sgx_tse: see license file at sgx_tse/LICENSE
 sgx_tstd: see license file at sgx_tstd/LICENSE
 sgx_types: see license file at sgx_types/LICENSE
+sgx_ucrypto: see license file at sgx_ucrypto/LICENSE
 sgx_unwind: see license file at sgx_unwind/LICENSE
 sgx_urts: see license file at sgx_urts/LICENSE
 smallvec: MIT/Apache-2.0

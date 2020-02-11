@@ -289,6 +289,7 @@ dependencies = [
  "sgx_tcrypto 1.1.0 (git+https://github.com/apache/teaclave-sgx-sdk?rev=v1.1.0)",
  "sgx_tse 1.1.0 (git+https://github.com/apache/teaclave-sgx-sdk?rev=v1.1.0)",
  "sgx_tstd 1.1.0 (git+https://github.com/apache/teaclave-sgx-sdk?rev=v1.1.0)",
+ "sgx_ucrypto 1.1.0 (git+https://github.com/apache/teaclave-sgx-sdk?rev=v1.1.0)",
  "sgx_urts 1.1.0 (git+https://github.com/apache/teaclave-sgx-sdk?rev=v1.1.0)",
  "structopt 0.2.18 (registry+https://github.com/rust-lang/crates.io-index)",
  "thiserror 1.0.10 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1461,6 +1462,17 @@ version = "1.1.0"
 source = "git+https://github.com/apache/teaclave-sgx-sdk?rev=v1.1.0#93c76de88befbfc1f483ce8336c7ee1f0c7f7563"
 
 [[package]]
+name = "sgx_ucrypto"
+version = "1.1.0"
+source = "git+https://github.com/apache/teaclave-sgx-sdk?rev=v1.1.0#93c76de88befbfc1f483ce8336c7ee1f0c7f7563"
+dependencies = [
+ "libc 0.2.66 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rand_core 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rdrand 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sgx_types 1.1.0 (git+https://github.com/apache/teaclave-sgx-sdk?rev=v1.1.0)",
+]
+
+[[package]]
 name = "sgx_unwind"
 version = "0.1.0"
 source = "git+https://github.com/apache/teaclave-sgx-sdk?rev=v1.1.0#93c76de88befbfc1f483ce8336c7ee1f0c7f7563"
@@ -2136,6 +2148,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum sgx_tseal 1.1.0 (git+https://github.com/apache/teaclave-sgx-sdk?rev=v1.1.0)" = "<none>"
 "checksum sgx_tstd 1.1.0 (git+https://github.com/apache/teaclave-sgx-sdk?rev=v1.1.0)" = "<none>"
 "checksum sgx_types 1.1.0 (git+https://github.com/apache/teaclave-sgx-sdk?rev=v1.1.0)" = "<none>"
+"checksum sgx_ucrypto 1.1.0 (git+https://github.com/apache/teaclave-sgx-sdk?rev=v1.1.0)" = "<none>"
 "checksum sgx_unwind 0.1.0 (git+https://github.com/apache/teaclave-sgx-sdk?rev=v1.1.0)" = "<none>"
 "checksum sgx_urts 1.1.0 (git+https://github.com/apache/teaclave-sgx-sdk?rev=v1.1.0)" = "<none>"
 "checksum smallvec 1.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "5c2fb2ec9bcd216a5b0d0ccf31ab17b5ed1d627960edff65bbe95d3ce221cefc"

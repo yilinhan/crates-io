@@ -1,6 +1,7 @@
 aho-corasick: Unlicense/MIT
 ansi_term: MIT
 anyhow: MIT OR Apache-2.0
+arc-swap: Apache-2.0/MIT
 atty: MIT
 autocfg-0.1.7: Apache-2.0/MIT
 autocfg: Apache-2.0 OR MIT
@@ -165,6 +166,8 @@ sgx_types: see license file at sgx_types/LICENSE
 sgx_ucrypto: see license file at sgx_ucrypto/LICENSE
 sgx_unwind: see license file at sgx_unwind/LICENSE
 sgx_urts: see license file at sgx_urts/LICENSE
+signal-hook: Apache-2.0/MIT
+signal-hook-registry: Apache-2.0/MIT
 smallvec: MIT/Apache-2.0
 sourcefile: Apache-2.0/MIT
 spin: MIT

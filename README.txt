@@ -1,6 +1,7 @@
 aho-corasick                  0.7.8
 ansi_term                     0.11.0
 anyhow                        1.0.26
+arc-swap                      0.4.4
 atty                          0.2.14
 autocfg                       0.1.7
 autocfg                       1.0.0
@@ -141,6 +142,8 @@ semver-parser                 0.7.0
 serde                         1.0.104
 serde_derive                  1.0.104
 serde_json                    1.0.47
+signal-hook                   0.1.13
+signal-hook-registry          1.2.0
 smallvec                      1.2.0
 sourcefile                    0.1.4
 spin                          0.5.2

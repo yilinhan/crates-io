@@ -13,7 +13,7 @@
 [package]
 edition = "2018"
 name = "hex"
-version = "0.4.1"
+version = "0.4.2"
 authors = ["KokaKiwi <kokakiwi@kokakiwi.net>"]
 description = "Encoding and decoding data into/from hexadecimal representation."
 documentation = "https://docs.rs/hex/"

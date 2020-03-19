@@ -1087,6 +1087,45 @@ fn regression_ascii_case_insensitive_no_exponential() {
     assert!(ac.find("").is_none());
 }
 
+// See: https://github.com/BurntSushi/aho-corasick/issues/53
+//
+// This test ensures that the rare byte prefilter works in a particular corner
+// case. In particular, the shift offset detected for '/' in the patterns below
+// was incorrect, leading to a false negative.
+#[test]
+fn regression_rare_byte_prefilter() {
+    use AhoCorasick;
+
+    let ac = AhoCorasick::new_auto_configured(&["ab/j/", "x/"]);
+    assert!(ac.is_match("ab/j/"));
+}
+
+#[test]
+fn regression_case_insensitive_prefilter() {
+    use AhoCorasickBuilder;
+
+    for c in b'a'..b'z' {
+        for c2 in b'a'..b'z' {
+            let c = c as char;
+            let c2 = c2 as char;
+            let needle = format!("{}{}", c, c2).to_lowercase();
+            let haystack = needle.to_uppercase();
+            let ac = AhoCorasickBuilder::new()
+                .ascii_case_insensitive(true)
+                .prefilter(true)
+                .build(&[&needle]);
+            assert_eq!(
+                1,
+                ac.find_iter(&haystack).count(),
+                "failed to find {:?} in {:?}\n\nautomaton:\n{:?}",
+                needle,
+                haystack,
+                ac,
+            );
+        }
+    }
+}
+
 fn run_search_tests<F: FnMut(&SearchTest) -> Vec<Match>>(
     which: TestCollection,
     mut f: F,

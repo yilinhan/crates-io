@@ -1,494 +1,448 @@
 //! HTTP Server
 //!
+//! A `Server` is created to listen on a port, parse HTTP requests, and hand
+//! them off to a `Service`.
+//!
+//! There are two levels of APIs provide for constructing HTTP servers:
+//!
+//! - The higher-level [`Server`](Server) type.
+//! - The lower-level [`conn`](conn) module.
+//!
 //! # Server
 //!
-//! A `Server` is created to listen on port, parse HTTP requests, and hand
-//! them off to a `Handler`. By default, the Server will listen across multiple
-//! threads, but that can be configured to a single thread if preferred.
+//! The [`Server`](Server) is main way to start listening for HTTP requests.
+//! It wraps a listener with a [`MakeService`](crate::service), and then should
+//! be executed to start serving requests.
 //!
-//! # Handling requests
+//! [`Server`](Server) accepts connections in both HTTP1 and HTTP2 by default.
 //!
-//! You must pass a `Handler` to the Server that will handle requests. There is
-//! a default implementation for `fn`s and closures, allowing you pass one of
-//! those easily.
-//!
+//! ## Example
 //!
 //! ```no_run
-//! use hyper::server::{Server, Request, Response};
+//! use std::convert::Infallible;
+//! use std::net::SocketAddr;
+//! use hyper::{Body, Request, Response, Server};
+//! use hyper::service::{make_service_fn, service_fn};
 //!
-//! fn hello(req: Request, res: Response) {
-//!     // handle things here
+//! async fn handle(_req: Request<Body>) -> Result<Response<Body>, Infallible> {
+//!     Ok(Response::new(Body::from("Hello World")))
 //! }
 //!
-//! Server::http("0.0.0.0:0").unwrap().handle(hello).unwrap();
-//! ```
+//! # #[cfg(feature = "runtime")]
+//! #[tokio::main]
+//! async fn main() {
+//!     // Construct our SocketAddr to listen on...
+//!     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
 //!
-//! As with any trait, you can also define a struct and implement `Handler`
-//! directly on your own type, and pass that to the `Server` instead.
+//!     // And a MakeService to handle each connection...
+//!     let make_service = make_service_fn(|_conn| async {
+//!         Ok::<_, Infallible>(service_fn(handle))
+//!     });
 //!
-//! ```no_run
-//! use std::sync::Mutex;
-//! use std::sync::mpsc::{channel, Sender};
-//! use hyper::server::{Handler, Server, Request, Response};
+//!     // Then bind and serve...
+//!     let server = Server::bind(&addr).serve(make_service);
 //!
-//! struct SenderHandler {
-//!     sender: Mutex<Sender<&'static str>>
-//! }
-//!
-//! impl Handler for SenderHandler {
-//!     fn handle(&self, req: Request, res: Response) {
-//!         self.sender.lock().unwrap().send("start").unwrap();
+//!     // And run forever...
+//!     if let Err(e) = server.await {
+//!         eprintln!("server error: {}", e);
 //!     }
 //! }
-//!
-//!
-//! let (tx, rx) = channel();
-//! Server::http("0.0.0.0:0").unwrap().handle(SenderHandler {
-//!     sender: Mutex::new(tx)
-//! }).unwrap();
+//! # #[cfg(not(feature = "runtime"))]
+//! # fn main() {}
 //! ```
-//!
-//! Since the `Server` will be listening on multiple threads, the `Handler`
-//! must implement `Sync`: any mutable state must be synchronized.
-//!
-//! ```no_run
-//! use std::sync::atomic::{AtomicUsize, Ordering};
-//! use hyper::server::{Server, Request, Response};
-//!
-//! let counter = AtomicUsize::new(0);
-//! Server::http("0.0.0.0:0").unwrap().handle(move |req: Request, res: Response| {
-//!     counter.fetch_add(1, Ordering::Relaxed);
-//! }).unwrap();
-//! ```
-//!
-//! # The `Request` and `Response` pair
-//!
-//! A `Handler` receives a pair of arguments, a `Request` and a `Response`. The
-//! `Request` includes access to the `method`, `uri`, and `headers` of the
-//! incoming HTTP request. It also implements `std::io::Read`, in order to
-//! read any body, such as with `POST` or `PUT` messages.
-//!
-//! Likewise, the `Response` includes ways to set the `status` and `headers`,
-//! and implements `std::io::Write` to allow writing the response body.
-//!
-//! ```no_run
-//! use std::io;
-//! use hyper::server::{Server, Request, Response};
-//! use hyper::status::StatusCode;
-//!
-//! Server::http("0.0.0.0:0").unwrap().handle(|mut req: Request, mut res: Response| {
-//!     match req.method {
-//!         hyper::Post => {
-//!             io::copy(&mut req, &mut res.start().unwrap()).unwrap();
-//!         },
-//!         _ => *res.status_mut() = StatusCode::MethodNotAllowed
-//!     }
-//! }).unwrap();
-//! ```
-//!
-//! ## An aside: Write Status
-//!
-//! The `Response` uses a phantom type parameter to determine its write status.
-//! What does that mean? In short, it ensures you never write a body before
-//! adding all headers, and never add a header after writing some of the body.
-//!
-//! This is often done in most implementations by include a boolean property
-//! on the response, such as `headers_written`, checking that each time the
-//! body has something to write, so as to make sure the headers are sent once,
-//! and only once. But this has 2 downsides:
-//!
-//! 1. You are typically never notified that your late header is doing nothing.
-//! 2. There's a runtime cost to checking on every write.
-//!
-//! Instead, hyper handles this statically, or at compile-time. A
-//! `Response<Fresh>` includes a `headers_mut()` method, allowing you add more
-//! headers. It also does not implement `Write`, so you can't accidentally
-//! write early. Once the "head" of the response is correct, you can "send" it
-//! out by calling `start` on the `Response<Fresh>`. This will return a new
-//! `Response<Streaming>` object, that no longer has `headers_mut()`, but does
-//! implement `Write`.
+
+pub mod accept;
+pub mod conn;
+mod shutdown;
+#[cfg(feature = "tcp")]
+mod tcp;
+
+use std::error::Error as StdError;
 use std::fmt;
-use std::io::{self, ErrorKind, BufWriter, Write};
-use std::net::{SocketAddr, ToSocketAddrs, Shutdown};
-use std::thread::{self, JoinHandle};
+#[cfg(feature = "tcp")]
+use std::net::{SocketAddr, TcpListener as StdTcpListener};
+
+#[cfg(feature = "tcp")]
 use std::time::Duration;
 
-use num_cpus;
+use pin_project::pin_project;
+use tokio::io::{AsyncRead, AsyncWrite};
 
-pub use self::request::Request;
-pub use self::response::Response;
+use self::accept::Accept;
+use crate::body::{Body, Payload};
+use crate::common::exec::{Exec, H2Exec, NewSvcExec};
+use crate::common::{task, Future, Pin, Poll, Unpin};
+use crate::service::{HttpService, MakeServiceRef};
+// Renamed `Http` as `Http_` for now so that people upgrading don't see an
+// error that `hyper::server::Http` is private...
+use self::conn::{Http as Http_, NoopWatcher, SpawnAll};
+use self::shutdown::{Graceful, GracefulWatcher};
+#[cfg(feature = "tcp")]
+use self::tcp::AddrIncoming;
 
-pub use net::{Fresh, Streaming};
-
-use Error;
-use buffer::BufReader;
-use header::{Headers, Expect, Connection};
-use http;
-use method::Method;
-use net::{NetworkListener, NetworkStream, HttpListener, HttpsListener, SslServer};
-use status::StatusCode;
-use uri::RequestUri;
-use version::HttpVersion::Http11;
-
-use self::listener::ListenerPool;
-
-pub mod request;
-pub mod response;
-
-mod listener;
-
-/// A server can listen on a TCP socket.
+/// A listening HTTP server that accepts connections in both HTTP1 and HTTP2 by default.
 ///
-/// Once listening, it will create a `Request`/`Response` pair for each
-/// incoming connection, and hand them to the provided handler.
+/// `Server` is a `Future` mapping a bound listener with a set of service
+/// handlers. It is built using the [`Builder`](Builder), and the future
+/// completes when the server has been shutdown. It should be run by an
+/// `Executor`.
+#[pin_project]
+pub struct Server<I, S, E = Exec> {
+    #[pin]
+    spawn_all: SpawnAll<I, S, E>,
+}
+
+/// A builder for a [`Server`](Server).
 #[derive(Debug)]
-pub struct Server<L = HttpListener> {
-    listener: L,
-    timeouts: Timeouts,
+pub struct Builder<I, E = Exec> {
+    incoming: I,
+    protocol: Http_<E>,
 }
 
-#[derive(Clone, Copy, Debug)]
-struct Timeouts {
-    read: Option<Duration>,
-    keep_alive: Option<Duration>,
-}
+// ===== impl Server =====
 
-impl Default for Timeouts {
-    fn default() -> Timeouts {
-        Timeouts {
-            read: None,
-            keep_alive: Some(Duration::from_secs(5))
+impl<I> Server<I, ()> {
+    /// Starts a [`Builder`](Builder) with the provided incoming stream.
+    pub fn builder(incoming: I) -> Builder<I> {
+        Builder {
+            incoming,
+            protocol: Http_::new(),
         }
     }
 }
 
-impl<L: NetworkListener> Server<L> {
-    /// Creates a new server with the provided handler.
-    #[inline]
-    pub fn new(listener: L) -> Server<L> {
-        Server {
-            listener: listener,
-            timeouts: Timeouts::default()
-        }
-    }
-
-    /// Controls keep-alive for this server.
+#[cfg(feature = "tcp")]
+impl Server<AddrIncoming, ()> {
+    /// Binds to the provided address, and returns a [`Builder`](Builder).
     ///
-    /// The timeout duration passed will be used to determine how long
-    /// to keep the connection alive before dropping it.
+    /// # Panics
     ///
-    /// Passing `None` will disable keep-alive.
+    /// This method will panic if binding to the address fails. For a method
+    /// to bind to an address and return a `Result`, see `Server::try_bind`.
+    pub fn bind(addr: &SocketAddr) -> Builder<AddrIncoming> {
+        let incoming = AddrIncoming::new(addr).unwrap_or_else(|e| {
+            panic!("error binding to {}: {}", addr, e);
+        });
+        Server::builder(incoming)
+    }
+
+    /// Tries to bind to the provided address, and returns a [`Builder`](Builder).
+    pub fn try_bind(addr: &SocketAddr) -> crate::Result<Builder<AddrIncoming>> {
+        AddrIncoming::new(addr).map(Server::builder)
+    }
+
+    /// Create a new instance from a `std::net::TcpListener` instance.
+    pub fn from_tcp(listener: StdTcpListener) -> Result<Builder<AddrIncoming>, crate::Error> {
+        AddrIncoming::from_std(listener).map(Server::builder)
+    }
+}
+
+#[cfg(feature = "tcp")]
+impl<S, E> Server<AddrIncoming, S, E> {
+    /// Returns the local address that this server is bound to.
+    pub fn local_addr(&self) -> SocketAddr {
+        self.spawn_all.local_addr()
+    }
+}
+
+impl<I, IO, IE, S, E, B> Server<I, S, E>
+where
+    I: Accept<Conn = IO, Error = IE>,
+    IE: Into<Box<dyn StdError + Send + Sync>>,
+    IO: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    S: MakeServiceRef<IO, Body, ResBody = B>,
+    S::Error: Into<Box<dyn StdError + Send + Sync>>,
+    B: Payload,
+    E: H2Exec<<S::Service as HttpService<Body>>::Future, B>,
+    E: NewSvcExec<IO, S::Future, S::Service, E, GracefulWatcher>,
+{
+    /// Prepares a server to handle graceful shutdown when the provided future
+    /// completes.
     ///
-    /// Default is enabled with a 5 second timeout.
-    #[inline]
-    pub fn keep_alive(&mut self, timeout: Option<Duration>) {
-        self.timeouts.keep_alive = timeout;
-    }
-
-    /// Sets the read timeout for all Request reads.
-    pub fn set_read_timeout(&mut self, dur: Option<Duration>) {
-        self.listener.set_read_timeout(dur);
-        self.timeouts.read = dur;
-    }
-
-    /// Sets the write timeout for all Response writes.
-    pub fn set_write_timeout(&mut self, dur: Option<Duration>) {
-        self.listener.set_write_timeout(dur);
-    }
-
-    /// Get the address that the server is listening on.
-    pub fn local_addr(&mut self) -> io::Result<SocketAddr> {
-        self.listener.local_addr()
-    }
-}
-
-impl Server<HttpListener> {
-    /// Creates a new server that will handle `HttpStream`s.
-    pub fn http<To: ToSocketAddrs>(addr: To) -> ::Result<Server<HttpListener>> {
-        HttpListener::new(addr).map(Server::new)
-    }
-}
-
-impl<S: SslServer + Clone + Send> Server<HttpsListener<S>> {
-    /// Creates a new server that will handle `HttpStream`s over SSL.
+    /// # Example
     ///
-    /// You can use any SSL implementation, as long as implements `hyper::net::Ssl`.
-    pub fn https<A: ToSocketAddrs>(addr: A, ssl: S) -> ::Result<Server<HttpsListener<S>>> {
-        HttpsListener::new(addr, ssl).map(Server::new)
-    }
-}
-
-impl<L: NetworkListener + Send + 'static> Server<L> {
-    /// Binds to a socket and starts handling connections.
-    pub fn handle<H: Handler + 'static>(self, handler: H) -> ::Result<Listening> {
-        self.handle_threads(handler, num_cpus::get() * 5 / 4)
-    }
-
-    /// Binds to a socket and starts handling connections with the provided
-    /// number of threads.
-    pub fn handle_threads<H: Handler + 'static>(self, handler: H,
-            threads: usize) -> ::Result<Listening> {
-        handle(self, handler, threads)
-    }
-}
-
-fn handle<H, L>(mut server: Server<L>, handler: H, threads: usize) -> ::Result<Listening>
-where H: Handler + 'static, L: NetworkListener + Send + 'static {
-    let socket = try!(server.listener.local_addr());
-
-    debug!("threads = {:?}", threads);
-    let pool = ListenerPool::new(server.listener);
-    let worker = Worker::new(handler, server.timeouts);
-    let work = move |mut stream| worker.handle_connection(&mut stream);
-
-    let guard = thread::spawn(move || pool.accept(work, threads));
-
-    Ok(Listening {
-        _guard: Some(guard),
-        socket: socket,
-    })
-}
-
-struct Worker<H: Handler + 'static> {
-    handler: H,
-    timeouts: Timeouts,
-}
-
-impl<H: Handler + 'static> Worker<H> {
-    fn new(handler: H, timeouts: Timeouts) -> Worker<H> {
-        Worker {
-            handler: handler,
-            timeouts: timeouts,
-        }
-    }
-
-    fn handle_connection<S>(&self, stream: &mut S) where S: NetworkStream + Clone {
-        debug!("Incoming stream");
-
-        self.handler.on_connection_start();
-
-        let addr = match stream.peer_addr() {
-            Ok(addr) => addr,
-            Err(e) => {
-                info!("Peer Name error: {:?}", e);
-                return;
-            }
-        };
-
-        let stream2: &mut NetworkStream = &mut stream.clone();
-        let mut rdr = BufReader::new(stream2);
-        let mut wrt = BufWriter::new(stream);
-
-        while self.keep_alive_loop(&mut rdr, &mut wrt, addr) {
-            if let Err(e) = self.set_read_timeout(*rdr.get_ref(), self.timeouts.keep_alive) {
-                info!("set_read_timeout keep_alive {:?}", e);
-                break;
-            }
-        }
-
-        self.handler.on_connection_end();
-
-        debug!("keep_alive loop ending for {}", addr);
-
-        if let Err(e) = rdr.get_mut().close(Shutdown::Both) {
-            info!("failed to close stream: {}", e);
-        }
-    }
-
-    fn set_read_timeout(&self, s: &NetworkStream, timeout: Option<Duration>) -> io::Result<()> {
-        s.set_read_timeout(timeout)
-    }
-
-    fn keep_alive_loop<W: Write>(&self, rdr: &mut BufReader<&mut NetworkStream>,
-            wrt: &mut W, addr: SocketAddr) -> bool {
-        let req = match Request::new(rdr, addr) {
-            Ok(req) => req,
-            Err(Error::Io(ref e)) if e.kind() == ErrorKind::ConnectionAborted => {
-                trace!("tcp closed, cancelling keep-alive loop");
-                return false;
-            }
-            Err(Error::Io(e)) => {
-                debug!("ioerror in keepalive loop = {:?}", e);
-                return false;
-            }
-            Err(e) => {
-                //TODO: send a 400 response
-                info!("request error = {:?}", e);
-                return false;
-            }
-        };
-
-        if !self.handle_expect(&req, wrt) {
-            return false;
-        }
-
-        if let Err(e) = req.set_read_timeout(self.timeouts.read) {
-            info!("set_read_timeout {:?}", e);
-            return false;
-        }
-
-        let mut keep_alive = self.timeouts.keep_alive.is_some() &&
-            http::should_keep_alive(req.version, &req.headers);
-        let version = req.version;
-        let mut res_headers = Headers::new();
-        if !keep_alive {
-            res_headers.set(Connection::close());
-        }
-        {
-            let mut res = Response::new(wrt, &mut res_headers);
-            res.version = version;
-            self.handler.handle(req, res);
-        }
-
-        // if the request was keep-alive, we need to check that the server agrees
-        // if it wasn't, then the server cannot force it to be true anyways
-        if keep_alive {
-            keep_alive = http::should_keep_alive(version, &res_headers);
-        }
-
-        debug!("keep_alive = {:?} for {}", keep_alive, addr);
-        keep_alive
-    }
-
-    fn handle_expect<W: Write>(&self, req: &Request, wrt: &mut W) -> bool {
-         if req.version == Http11 && req.headers.get() == Some(&Expect::Continue) {
-            let status = self.handler.check_continue((&req.method, &req.uri, &req.headers));
-            match write!(wrt, "{} {}\r\n\r\n", Http11, status).and_then(|_| wrt.flush()) {
-                Ok(..) => (),
-                Err(e) => {
-                    info!("error writing 100-continue: {:?}", e);
-                    return false;
-                }
-            }
-
-            if status != StatusCode::Continue {
-                debug!("non-100 status ({}) for Expect 100 request", status);
-                return false;
-            }
-        }
-
-        true
-    }
-}
-
-/// A listening server, which can later be closed.
-pub struct Listening {
-    _guard: Option<JoinHandle<()>>,
-    /// The socket addresses that the server is bound to.
-    pub socket: SocketAddr,
-}
-
-impl fmt::Debug for Listening {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Listening {{ socket: {:?} }}", self.socket)
-    }
-}
-
-impl Drop for Listening {
-    fn drop(&mut self) {
-        let _ = self._guard.take().map(|g| g.join());
-    }
-}
-
-impl Listening {
-    /// Warning: This function doesn't work. The server remains listening after you called
-    /// it. See https://github.com/hyperium/hyper/issues/338 for more details.
+    /// ```
+    /// # fn main() {}
+    /// # #[cfg(feature = "tcp")]
+    /// # async fn run() {
+    /// # use hyper::{Body, Response, Server, Error};
+    /// # use hyper::service::{make_service_fn, service_fn};
+    /// # let make_service = make_service_fn(|_| async {
+    /// #     Ok::<_, Error>(service_fn(|_req| async {
+    /// #         Ok::<_, Error>(Response::new(Body::from("Hello World")))
+    /// #     }))
+    /// # });
+    /// // Make a server from the previous examples...
+    /// let server = Server::bind(&([127, 0, 0, 1], 3000).into())
+    ///     .serve(make_service);
     ///
-    /// Stop the server from listening to its socket address.
-    pub fn close(&mut self) -> ::Result<()> {
-        let _ = self._guard.take();
-        debug!("closing server");
-        Ok(())
-    }
-}
-
-/// A handler that can handle incoming requests for a server.
-pub trait Handler: Sync + Send {
-    /// Receives a `Request`/`Response` pair, and should perform some action on them.
+    /// // Prepare some signal for when the server should start shutting down...
+    /// let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+    /// let graceful = server
+    ///     .with_graceful_shutdown(async {
+    ///         rx.await.ok();
+    ///     });
     ///
-    /// This could reading from the request, and writing to the response.
-    fn handle<'a, 'k>(&'a self, Request<'a, 'k>, Response<'a, Fresh>);
-
-    /// Called when a Request includes a `Expect: 100-continue` header.
+    /// // Await the `server` receiving the signal...
+    /// if let Err(e) = graceful.await {
+    ///     eprintln!("server error: {}", e);
+    /// }
     ///
-    /// By default, this will always immediately response with a `StatusCode::Continue`,
-    /// but can be overridden with custom behavior.
-    fn check_continue(&self, _: (&Method, &RequestUri, &Headers)) -> StatusCode {
-        StatusCode::Continue
-    }
-
-    /// This is run after a connection is received, on a per-connection basis (not a
-    /// per-request basis, as a connection with keep-alive may handle multiple
-    /// requests)
-    fn on_connection_start(&self) { }
-
-    /// This is run before a connection is closed, on a per-connection basis (not a
-    /// per-request basis, as a connection with keep-alive may handle multiple
-    /// requests)
-    fn on_connection_end(&self) { }
-}
-
-impl<F> Handler for F where F: Fn(Request, Response<Fresh>), F: Sync + Send {
-    fn handle<'a, 'k>(&'a self, req: Request<'a, 'k>, res: Response<'a, Fresh>) {
-        self(req, res)
+    /// // And later, trigger the signal by calling `tx.send(())`.
+    /// let _ = tx.send(());
+    /// # }
+    /// ```
+    pub fn with_graceful_shutdown<F>(self, signal: F) -> Graceful<I, S, F, E>
+    where
+        F: Future<Output = ()>,
+    {
+        Graceful::new(self.spawn_all, signal)
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use header::Headers;
-    use method::Method;
-    use mock::MockStream;
-    use status::StatusCode;
-    use uri::RequestUri;
+impl<I, IO, IE, S, B, E> Future for Server<I, S, E>
+where
+    I: Accept<Conn = IO, Error = IE>,
+    IE: Into<Box<dyn StdError + Send + Sync>>,
+    IO: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+    S: MakeServiceRef<IO, Body, ResBody = B>,
+    S::Error: Into<Box<dyn StdError + Send + Sync>>,
+    B: Payload,
+    E: H2Exec<<S::Service as HttpService<Body>>::Future, B>,
+    E: NewSvcExec<IO, S::Future, S::Service, E, NoopWatcher>,
+{
+    type Output = crate::Result<()>;
 
-    use super::{Request, Response, Fresh, Handler, Worker};
+    fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
+        self.project().spawn_all.poll_watch(cx, &NoopWatcher)
+    }
+}
 
-    #[test]
-    fn test_check_continue_default() {
-        let mut mock = MockStream::with_input(b"\
-            POST /upload HTTP/1.1\r\n\
-            Host: example.domain\r\n\
-            Expect: 100-continue\r\n\
-            Content-Length: 10\r\n\
-            \r\n\
-            1234567890\
-        ");
+impl<I: fmt::Debug, S: fmt::Debug> fmt::Debug for Server<I, S> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Server")
+            .field("listener", &self.spawn_all.incoming_ref())
+            .finish()
+    }
+}
 
-        fn handle(_: Request, res: Response<Fresh>) {
-            res.start().unwrap().end().unwrap();
-        }
+// ===== impl Builder =====
 
-        Worker::new(handle, Default::default()).handle_connection(&mut mock);
-        let cont = b"HTTP/1.1 100 Continue\r\n\r\n";
-        assert_eq!(&mock.write[..cont.len()], cont);
-        let res = b"HTTP/1.1 200 OK\r\n";
-        assert_eq!(&mock.write[cont.len()..cont.len() + res.len()], res);
+impl<I, E> Builder<I, E> {
+    /// Start a new builder, wrapping an incoming stream and low-level options.
+    ///
+    /// For a more convenient constructor, see [`Server::bind`](Server::bind).
+    pub fn new(incoming: I, protocol: Http_<E>) -> Self {
+        Builder { incoming, protocol }
     }
 
-    #[test]
-    fn test_check_continue_reject() {
-        struct Reject;
-        impl Handler for Reject {
-            fn handle<'a, 'k>(&'a self, _: Request<'a, 'k>, res: Response<'a, Fresh>) {
-                res.start().unwrap().end().unwrap();
-            }
+    /// Sets whether to use keep-alive for HTTP/1 connections.
+    ///
+    /// Default is `true`.
+    pub fn http1_keepalive(mut self, val: bool) -> Self {
+        self.protocol.keep_alive(val);
+        self
+    }
 
-            fn check_continue(&self, _: (&Method, &RequestUri, &Headers)) -> StatusCode {
-                StatusCode::ExpectationFailed
-            }
+    /// Set whether HTTP/1 connections should support half-closures.
+    ///
+    /// Clients can chose to shutdown their write-side while waiting
+    /// for the server to respond. Setting this to `true` will
+    /// prevent closing the connection immediately if `read`
+    /// detects an EOF in the middle of a request.
+    ///
+    /// Default is `false`.
+    pub fn http1_half_close(mut self, val: bool) -> Self {
+        self.protocol.http1_half_close(val);
+        self
+    }
+
+    /// Sets whether HTTP/1 is required.
+    ///
+    /// Default is `false`.
+    pub fn http1_only(mut self, val: bool) -> Self {
+        self.protocol.http1_only(val);
+        self
+    }
+
+    // Sets whether to bunch up HTTP/1 writes until the read buffer is empty.
+    //
+    // This isn't really desirable in most cases, only really being useful in
+    // silly pipeline benchmarks.
+    #[doc(hidden)]
+    pub fn http1_pipeline_flush(mut self, val: bool) -> Self {
+        self.protocol.pipeline_flush(val);
+        self
+    }
+
+    /// Set whether HTTP/1 connections should try to use vectored writes,
+    /// or always flatten into a single buffer.
+    ///
+    /// # Note
+    ///
+    /// Setting this to `false` may mean more copies of body data,
+    /// but may also improve performance when an IO transport doesn't
+    /// support vectored writes well, such as most TLS implementations.
+    ///
+    /// Default is `true`.
+    pub fn http1_writev(mut self, val: bool) -> Self {
+        self.protocol.http1_writev(val);
+        self
+    }
+
+    /// Sets whether HTTP/2 is required.
+    ///
+    /// Default is `false`.
+    pub fn http2_only(mut self, val: bool) -> Self {
+        self.protocol.http2_only(val);
+        self
+    }
+
+    /// Sets the [`SETTINGS_INITIAL_WINDOW_SIZE`][spec] option for HTTP2
+    /// stream-level flow control.
+    ///
+    /// Passing `None` will do nothing.
+    ///
+    /// If not set, hyper will use a default.
+    ///
+    /// [spec]: https://http2.github.io/http2-spec/#SETTINGS_INITIAL_WINDOW_SIZE
+    pub fn http2_initial_stream_window_size(mut self, sz: impl Into<Option<u32>>) -> Self {
+        self.protocol.http2_initial_stream_window_size(sz.into());
+        self
+    }
+
+    /// Sets the max connection-level flow control for HTTP2
+    ///
+    /// Passing `None` will do nothing.
+    ///
+    /// If not set, hyper will use a default.
+    pub fn http2_initial_connection_window_size(mut self, sz: impl Into<Option<u32>>) -> Self {
+        self.protocol
+            .http2_initial_connection_window_size(sz.into());
+        self
+    }
+
+    /// Sets whether to use an adaptive flow control.
+    ///
+    /// Enabling this will override the limits set in
+    /// `http2_initial_stream_window_size` and
+    /// `http2_initial_connection_window_size`.
+    pub fn http2_adaptive_window(mut self, enabled: bool) -> Self {
+        self.protocol.http2_adaptive_window(enabled);
+        self
+    }
+
+    /// Sets the [`SETTINGS_MAX_CONCURRENT_STREAMS`][spec] option for HTTP2
+    /// connections.
+    ///
+    /// Default is no limit (`std::u32::MAX`). Passing `None` will do nothing.
+    ///
+    /// [spec]: https://http2.github.io/http2-spec/#SETTINGS_MAX_CONCURRENT_STREAMS
+    pub fn http2_max_concurrent_streams(mut self, max: impl Into<Option<u32>>) -> Self {
+        self.protocol.http2_max_concurrent_streams(max.into());
+        self
+    }
+
+    /// Set the maximum buffer size.
+    ///
+    /// Default is ~ 400kb.
+    pub fn http1_max_buf_size(mut self, val: usize) -> Self {
+        self.protocol.max_buf_size(val);
+        self
+    }
+
+    /// Sets the `Executor` to deal with connection tasks.
+    ///
+    /// Default is `tokio::spawn`.
+    pub fn executor<E2>(self, executor: E2) -> Builder<I, E2> {
+        Builder {
+            incoming: self.incoming,
+            protocol: self.protocol.with_executor(executor),
         }
+    }
 
-        let mut mock = MockStream::with_input(b"\
-            POST /upload HTTP/1.1\r\n\
-            Host: example.domain\r\n\
-            Expect: 100-continue\r\n\
-            Content-Length: 10\r\n\
-            \r\n\
-            1234567890\
-        ");
+    /// Consume this `Builder`, creating a [`Server`](Server).
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # #[cfg(feature = "tcp")]
+    /// # async fn run() {
+    /// use hyper::{Body, Error, Response, Server};
+    /// use hyper::service::{make_service_fn, service_fn};
+    ///
+    /// // Construct our SocketAddr to listen on...
+    /// let addr = ([127, 0, 0, 1], 3000).into();
+    ///
+    /// // And a MakeService to handle each connection...
+    /// let make_svc = make_service_fn(|_| async {
+    ///     Ok::<_, Error>(service_fn(|_req| async {
+    ///         Ok::<_, Error>(Response::new(Body::from("Hello World")))
+    ///     }))
+    /// });
+    ///
+    /// // Then bind and serve...
+    /// let server = Server::bind(&addr)
+    ///     .serve(make_svc);
+    ///
+    /// // Run forever-ish...
+    /// if let Err(err) = server.await {
+    ///     eprintln!("server error: {}", err);
+    /// }
+    /// # }
+    /// ```
+    pub fn serve<S, B>(self, new_service: S) -> Server<I, S, E>
+    where
+        I: Accept,
+        I::Error: Into<Box<dyn StdError + Send + Sync>>,
+        I::Conn: AsyncRead + AsyncWrite + Unpin + Send + 'static,
+        S: MakeServiceRef<I::Conn, Body, ResBody = B>,
+        S::Error: Into<Box<dyn StdError + Send + Sync>>,
+        B: Payload,
+        E: NewSvcExec<I::Conn, S::Future, S::Service, E, NoopWatcher>,
+        E: H2Exec<<S::Service as HttpService<Body>>::Future, B>,
+    {
+        let serve = self.protocol.serve(self.incoming, new_service);
+        let spawn_all = serve.spawn_all();
+        Server { spawn_all }
+    }
+}
 
-        Worker::new(Reject, Default::default()).handle_connection(&mut mock);
-        assert_eq!(mock.write, &b"HTTP/1.1 417 Expectation Failed\r\n\r\n"[..]);
+#[cfg(feature = "tcp")]
+impl<E> Builder<AddrIncoming, E> {
+    /// Set whether TCP keepalive messages are enabled on accepted connections.
+    ///
+    /// If `None` is specified, keepalive is disabled, otherwise the duration
+    /// specified will be the time to remain idle before sending TCP keepalive
+    /// probes.
+    pub fn tcp_keepalive(mut self, keepalive: Option<Duration>) -> Self {
+        self.incoming.set_keepalive(keepalive);
+        self
+    }
+
+    /// Set the value of `TCP_NODELAY` option for accepted connections.
+    pub fn tcp_nodelay(mut self, enabled: bool) -> Self {
+        self.incoming.set_nodelay(enabled);
+        self
+    }
+
+    /// Set whether to sleep on accept errors.
+    ///
+    /// A possible scenario is that the process has hit the max open files
+    /// allowed, and so trying to accept a new connection will fail with
+    /// EMFILE. In some cases, it's preferable to just wait for some time, if
+    /// the application will likely close some files (or connections), and try
+    /// to accept the connection again. If this option is true, the error will
+    /// be logged at the error level, since it is still a big deal, and then
+    /// the listener will sleep for 1 second.
+    ///
+    /// In other cases, hitting the max open files should be treat similarly
+    /// to being out-of-memory, and simply error (and shutdown). Setting this
+    /// option to false will allow that.
+    ///
+    /// For more details see [`AddrIncoming::set_sleep_on_errors`]
+    pub fn tcp_sleep_on_accept_errors(mut self, val: bool) -> Self {
+        self.incoming.set_sleep_on_errors(val);
+        self
     }
 }

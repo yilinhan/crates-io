@@ -12,7 +12,7 @@
 
 [package]
 name = "failure"
-version = "0.1.6"
+version = "0.1.7"
 authors = ["Without Boats <boats@mozilla.com>"]
 description = "Experimental error handling abstraction."
 homepage = "https://rust-lang-nursery.github.io/failure/"
@@ -24,7 +24,7 @@ version = "0.3.3"
 optional = true
 
 [dependencies.failure_derive]
-version = "0.1.6"
+version = "0.1.7"
 optional = true
 
 [features]

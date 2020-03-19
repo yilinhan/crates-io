@@ -1,14 +1,11 @@
-#[cfg(not(feature = "std"))]
-use crate::alloc_prelude::*;
 use crate::{
-    format::parse::{parse, ParseError, ParseResult, ParsedItems},
+    format::parse::{parse, ParsedItems},
+    internal_prelude::*,
     internals,
-    shim::*,
-    ComponentRangeError, DeferredFormat, Duration, PrimitiveDateTime, Time,
-    Weekday::{self, Friday, Monday, Saturday, Sunday, Thursday, Tuesday, Wednesday},
 };
 use core::{
     cmp::{Ord, Ordering, PartialOrd},
+    fmt::{self, Display},
     ops::{Add, AddAssign, Sub, SubAssign},
     time::Duration as StdDuration,
 };
@@ -83,6 +80,11 @@ pub fn weeks_in_year(year: i32) -> u8 {
     }
 }
 
+/// The minimum valid year.
+pub(crate) const MIN_YEAR: i32 = -100_000;
+/// The maximum valid year.
+pub(crate) const MAX_YEAR: i32 = 100_000;
+
 /// Calendar date.
 ///
 /// Years between `-100_000` and `+100_000` inclusive are guaranteed to be
@@ -90,9 +92,9 @@ pub fn weeks_in_year(year: i32) -> u8 {
 /// that can change at any time without notice. If you need support outside this
 /// range, please [file an issue](https://github.com/time-rs/time/issues/new)
 /// with your use case.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(serde, derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
-    feature = "serde",
+    serde,
     serde(try_from = "crate::serde::Date", into = "crate::serde::Date")
 )]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -122,14 +124,15 @@ impl Date {
     /// Date::from_ymd(2019, 2, 29); // 2019 isn't a leap year.
     /// ```
     #[inline]
-    #[cfg(feature = "panicking-api")]
-    #[cfg_attr(doc, doc(cfg(feature = "panicking-api")))]
+    #[cfg(panicking_api)]
+    #[cfg_attr(docs, doc(cfg(feature = "panicking-api")))]
     #[deprecated(
         since = "0.2.3",
         note = "For dates knowable at compile-time, use the `date!` macro. For situations where a \
                 value isn't known, use `Date::try_from_ymd`."
     )]
     pub fn from_ymd(year: i32, month: u8, day: u8) -> Self {
+        assert_value_in_range!(year in MIN_YEAR => MAX_YEAR);
         assert_value_in_range!(month in 1 => 12);
         assert_value_in_range!(day in 1 => days_in_year_month(year, month), given year, month);
 
@@ -152,6 +155,7 @@ impl Date {
     /// ```
     #[inline]
     pub fn try_from_ymd(year: i32, month: u8, day: u8) -> Result<Self, ComponentRangeError> {
+        ensure_value_in_range!(year in MIN_YEAR => MAX_YEAR);
         ensure_value_in_range!(month in 1 => 12);
         ensure_value_in_range!(day in 1 => days_in_year_month(year, month), given year, month);
 
@@ -173,14 +177,15 @@ impl Date {
     /// Date::from_yo(2019, 366); // 2019 isn't a leap year.
     /// ```
     #[inline(always)]
-    #[cfg(feature = "panicking-api")]
-    #[cfg_attr(doc, doc(cfg(feature = "panicking-api")))]
+    #[cfg(panicking_api)]
+    #[cfg_attr(docs, doc(cfg(feature = "panicking-api")))]
     #[deprecated(
         since = "0.2.3",
         note = "For dates knowable at compile-time, use the `date!` macro. For situations where a \
                 value isn't known, use `Date::try_from_yo`."
     )]
     pub fn from_yo(year: i32, ordinal: u16) -> Self {
+        assert_value_in_range!(year in MIN_YEAR => MAX_YEAR);
         assert_value_in_range!(ordinal in 1 => days_in_year(year), given year);
         Self { year, ordinal }
     }
@@ -201,6 +206,7 @@ impl Date {
     /// ```
     #[inline(always)]
     pub fn try_from_yo(year: i32, ordinal: u16) -> Result<Self, ComponentRangeError> {
+        ensure_value_in_range!(year in MIN_YEAR => MAX_YEAR);
         ensure_value_in_range!(ordinal in 1 => days_in_year(year), given year);
         Ok(Self { year, ordinal })
     }
@@ -230,14 +236,15 @@ impl Date {
     /// Date::from_iso_ywd(2019, 53, Monday); // 2019 doesn't have 53 weeks.
     /// ```
     #[inline]
-    #[cfg(feature = "panicking-api")]
-    #[cfg_attr(doc, doc(cfg(feature = "panicking-api")))]
+    #[cfg(panicking_api)]
+    #[cfg_attr(docs, doc(cfg(feature = "panicking-api")))]
     #[deprecated(
         since = "0.2.3",
         note = "For dates knowable at compile-time, use the `date!` macro. For situations where a \
                 value isn't known, use `Date::try_from_iso_ywd`."
     )]
     pub fn from_iso_ywd(year: i32, week: u8, weekday: Weekday) -> Self {
+        assert_value_in_range!(year in MIN_YEAR => MAX_YEAR);
         assert_value_in_range!(week in 1 => weeks_in_year(year), given year);
         internals::Date::from_iso_ywd_unchecked(year, week, weekday)
     }
@@ -263,6 +270,7 @@ impl Date {
         week: u8,
         weekday: Weekday,
     ) -> Result<Self, ComponentRangeError> {
+        ensure_value_in_range!(year in MIN_YEAR => MAX_YEAR);
         ensure_value_in_range!(week in 1 => weeks_in_year(year), given year);
         Ok(internals::Date::from_iso_ywd_unchecked(year, week, weekday))
     }
@@ -274,8 +282,13 @@ impl Date {
     /// assert!(Date::today().year() >= 2019);
     /// ```
     #[inline(always)]
-    #[cfg(feature = "std")]
-    #[cfg_attr(doc, doc(cfg(feature = "std")))]
+    #[cfg(std)]
+    #[cfg_attr(docs, doc(cfg(feature = "std")))]
+    #[deprecated(
+        since = "0.2.7",
+        note = "This method returns a value that assumes an offset of UTC."
+    )]
+    #[allow(deprecated)]
     pub fn today() -> Self {
         PrimitiveDateTime::now().date()
     }
@@ -339,7 +352,8 @@ impl Date {
     // significantly faster to write the statements out by hand.
     #[inline]
     pub fn month_day(self) -> (u8, u8) {
-        ///
+        /// The number of days up to and including the given month. Common years
+        /// are first, followed by leap years.
         #[allow(clippy::items_after_statements)]
         const CUMULATIVE_DAYS_IN_MONTH_COMMON_LEAP: [[u16; 11]; 2] = [
             [31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334],
@@ -526,7 +540,7 @@ impl Date {
         match (day as i32 + (13 * (month as i32 + 1)) / 5 + adjusted_year + adjusted_year / 4
             - adjusted_year / 100
             + adjusted_year / 400)
-            .rem_euclid_shim(7)
+            .rem_euclid(7)
         {
             0 => Saturday,
             1 => Sunday,
@@ -558,6 +572,10 @@ impl Date {
             self.ordinal = 1;
         }
 
+        if self.year > MAX_YEAR {
+            panic!("overflow when fetching next day");
+        }
+
         self
     }
 
@@ -576,6 +594,10 @@ impl Date {
         if self.ordinal == 0 {
             self.year -= 1;
             self.ordinal = days_in_year(self.year);
+        }
+
+        if self.year < MIN_YEAR {
+            panic!("overflow when fetching previous day");
         }
 
         self
@@ -619,6 +641,7 @@ impl Date {
     /// assert_eq!(Date::from_julian_day(2_458_485), date!(2019-01-01));
     /// assert_eq!(Date::from_julian_day(2_458_849), date!(2019-12-31));
     /// ```
+    // TODO Return a `Result<Self, ComponentRangeError>` in 0.3
     #[inline]
     pub fn from_julian_day(julian_day: i64) -> Self {
         #![allow(clippy::missing_docs_in_private_items)]
@@ -637,20 +660,17 @@ impl Date {
 
         let f = julian_day + J + (((4 * julian_day + B) / 146_097) * 3) / 4 + C;
         let e = R * f + V;
-        let g = e.rem_euclid_shim(P) / R;
+        let g = e.rem_euclid(P) / R;
         let h = U * g + W;
-        let day = h.rem_euclid_shim(S) / U + 1;
-        let month = (h / S + M).rem_euclid_shim(N) + 1;
+        let day = h.rem_euclid(S) / U + 1;
+        let month = (h / S + M).rem_euclid(N) + 1;
         let year = (e / P) - Y + (N + M - month) / N;
 
-        // TODO Seek out a formal proof that this always results in a valid value.
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
-        Date::try_from_ymd(year as i32, month as u8, day as u8).unwrap_or_else(|e| {
-            unreachable!(
-                "Internal error. Please file an issue on the time repository.\n\n{}",
-                e
-            );
-        })
+        match Date::try_from_ymd(year as i32, month as u8, day as u8) {
+            Ok(date) => date,
+            Err(err) => panic!("{}", err),
+        }
     }
 }
 
@@ -695,8 +715,8 @@ impl Date {
     /// );
     /// ```
     #[inline(always)]
-    #[cfg(feature = "panicking-api")]
-    #[cfg_attr(doc, doc(cfg(feature = "panicking-api")))]
+    #[cfg(panicking_api)]
+    #[cfg_attr(docs, doc(cfg(feature = "panicking-api")))]
     #[allow(deprecated)]
     #[deprecated(
         since = "0.2.3",
@@ -739,8 +759,8 @@ impl Date {
     /// );
     /// ```
     #[inline(always)]
-    #[cfg(feature = "panicking-api")]
-    #[cfg_attr(doc, doc(cfg(feature = "panicking-api")))]
+    #[cfg(panicking_api)]
+    #[cfg_attr(docs, doc(cfg(feature = "panicking-api")))]
     #[allow(deprecated)]
     #[deprecated(
         since = "0.2.3",
@@ -791,8 +811,8 @@ impl Date {
     /// );
     /// ```
     #[inline(always)]
-    #[cfg(feature = "panicking-api")]
-    #[cfg_attr(doc, doc(cfg(feature = "panicking-api")))]
+    #[cfg(panicking_api)]
+    #[cfg_attr(docs, doc(cfg(feature = "panicking-api")))]
     #[allow(deprecated)]
     #[deprecated(
         since = "0.2.3",
@@ -848,8 +868,8 @@ impl Date {
     /// );
     /// ```
     #[inline(always)]
-    #[cfg(feature = "panicking-api")]
-    #[cfg_attr(doc, doc(cfg(feature = "panicking-api")))]
+    #[cfg(panicking_api)]
+    #[cfg_attr(docs, doc(cfg(feature = "panicking-api")))]
     #[allow(deprecated)]
     #[deprecated(
         since = "0.2.3",
@@ -897,14 +917,10 @@ impl Date {
     /// assert_eq!(date!(2019-01-02).format("%Y-%m-%d"), "2019-01-02");
     /// ```
     #[inline(always)]
-    pub fn format(self, format: &str) -> String {
-        DeferredFormat {
-            date: Some(self),
-            time: None,
-            offset: None,
-            format: crate::format::parse_fmt_string(format),
-        }
-        .to_string()
+    pub fn format(self, format: impl AsRef<str>) -> String {
+        DeferredFormat::new(format.as_ref())
+            .with_date(self)
+            .to_string()
     }
 
     /// Attempt to parse a `Date` using the provided string.
@@ -917,7 +933,7 @@ impl Date {
     /// );
     /// assert_eq!(
     ///     Date::parse("2019-002", "%Y-%j"),
-    ///     Ok(Date::try_from_yo(2019, 2).unwrap())
+    ///     Ok(date!(2019-002))
     /// );
     /// assert_eq!(
     ///     Date::parse("2019-W01-3", "%G-W%V-%u"),
@@ -925,8 +941,8 @@ impl Date {
     /// );
     /// ```
     #[inline(always)]
-    pub fn parse(s: &str, format: &str) -> ParseResult<Self> {
-        Self::try_from_parsed_items(parse(s, format)?)
+    pub fn parse(s: impl AsRef<str>, format: impl AsRef<str>) -> ParseResult<Self> {
+        Self::try_from_parsed_items(parse(s.as_ref(), format.as_ref())?)
     }
 
     /// Given the items already parsed, attempt to create a `Date`.
@@ -985,6 +1001,21 @@ impl Date {
             .map_err(Into::into),
             _ => Err(ParseError::InsufficientInformation),
         }
+    }
+}
+
+impl Display for Date {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        use crate::format::{date, Padding};
+
+        date::fmt_Y(f, *self, Padding::Zero)?;
+        f.write_str("-")?;
+        date::fmt_m(f, *self, Padding::Zero)?;
+        f.write_str("-")?;
+        date::fmt_d(f, *self, Padding::Zero)?;
+
+        Ok(())
     }
 }
 
@@ -1080,11 +1111,9 @@ impl Ord for Date {
 }
 
 #[cfg(test)]
-#[allow(clippy::result_unwrap_used)]
 #[rustfmt::skip::macros(date)]
 mod test {
     use super::*;
-    use crate::{date, prelude::*, time};
 
     macro_rules! julian {
         ($julian:literal) => {
@@ -1535,10 +1564,10 @@ mod test {
 
     #[test]
     #[allow(clippy::zero_prefixed_literal)]
-    fn test_parse_monday_based_week() {
+    fn test_parse_monday_based_week() -> crate::Result<()> {
         macro_rules! parse {
             ($s:literal) => {
-                Date::parse($s, "%a %W %Y").unwrap()
+                Date::parse($s, "%a %W %Y")?
             };
         }
 
@@ -1730,14 +1759,16 @@ mod test {
         assert_eq!(parse!("Tue 10 2024"), date!(2024-065));
         assert_eq!(parse!("Wed 10 2024"), date!(2024-066));
         assert_eq!(parse!("Thu 10 2024"), date!(2024-067));
+
+        Ok(())
     }
 
     #[test]
     #[allow(clippy::zero_prefixed_literal)]
-    fn test_parse_sunday_based_week() {
+    fn test_parse_sunday_based_week() -> crate::Result<()> {
         macro_rules! parse {
             ($s:literal) => {
-                Date::parse($s, "%a %U %Y").unwrap()
+                Date::parse($s, "%a %U %Y")?
             };
         }
 
@@ -1929,6 +1960,8 @@ mod test {
         assert_eq!(parse!("Tue 09 2036"), date!(2036-065));
         assert_eq!(parse!("Wed 09 2036"), date!(2036-066));
         assert_eq!(parse!("Thu 09 2036"), date!(2036-067));
+
+        Ok(())
     }
 
     #[test]
@@ -2042,7 +2075,7 @@ mod test {
     fn midnight() {
         assert_eq!(
             date!(1970-01-01).midnight(),
-            PrimitiveDateTime::unix_epoch()
+            date!(1970-01-01).with_time(time!(0:00)),
         );
     }
 
@@ -2055,7 +2088,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "panicking-api")]
+    #[cfg(panicking_api)]
     #[allow(deprecated)]
     fn with_hms() {
         assert_eq!(
@@ -2074,7 +2107,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "panicking-api")]
+    #[cfg(panicking_api)]
     #[allow(deprecated)]
     fn with_hms_milli() {
         assert_eq!(
@@ -2093,7 +2126,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "panicking-api")]
+    #[cfg(panicking_api)]
     #[allow(deprecated)]
     fn with_hms_micro() {
         assert_eq!(
@@ -2112,7 +2145,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "panicking-api")]
+    #[cfg(panicking_api)]
     #[allow(deprecated)]
     fn with_hms_nano() {
         assert_eq!(
@@ -2143,6 +2176,24 @@ mod test {
             Date::parse("2019-W01-3", "%G-W%V-%u"),
             Ok(date!(2019-W01-3))
         );
+        assert_eq!(Date::parse("20200201", "%Y%m%d"), Ok(date!(2020-02-01)));
+        assert_eq!(Date::parse("-1234-01-02", "%F"), Ok(date!(-1234-01-02)));
+        assert_eq!(Date::parse("-12345-01-02", "%F"), Ok(date!(-12345-01-02)));
+        assert!(Date::parse("-123456-01-02", "%F").is_err());
+    }
+
+    // See #221.
+    #[test]
+    fn parse_regression() {
+        assert_eq!(Date::parse("0000-01-01", "%Y-%m-%d"), Ok(date!(0000-01-01)));
+    }
+
+    #[test]
+    fn display() {
+        assert_eq!(date!(2019-01-01).to_string(), "2019-01-01");
+        assert_eq!(date!(2019-12-31).to_string(), "2019-12-31");
+        assert_eq!(date!(-4713-11-24).to_string(), "-4713-11-24");
+        assert_eq!(date!(10_000-01-01).to_string(), "+10000-01-01");
     }
 
     #[test]

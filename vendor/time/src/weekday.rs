@@ -1,11 +1,14 @@
+use crate::internal_prelude::*;
+use core::fmt::{self, Display};
+
 /// Days of the week.
 ///
 /// As order is dependent on context (Sunday could be either
 /// two days after or five days before Friday), this type does not implement
 /// `PartialOrd` or `Ord`.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(serde, derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
-    feature = "serde",
+    serde,
     serde(try_from = "crate::serde::Weekday", into = "crate::serde::Weekday")
 )]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -25,7 +28,6 @@ pub enum Weekday {
     #[allow(clippy::missing_docs_in_private_items)]
     Sunday,
 }
-use Weekday::{Friday, Monday, Saturday, Sunday, Thursday, Tuesday, Wednesday};
 
 impl Weekday {
     /// Get the previous weekday.
@@ -123,6 +125,21 @@ impl Weekday {
     }
 }
 
+impl Display for Weekday {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Monday => "Monday",
+            Tuesday => "Tuesday",
+            Wednesday => "Wednesday",
+            Thursday => "Thursday",
+            Friday => "Friday",
+            Saturday => "Saturday",
+            Sunday => "Sunday",
+        })
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -202,5 +219,16 @@ mod test {
         assert_eq!(Thursday.number_days_from_sunday(), 4);
         assert_eq!(Friday.number_days_from_sunday(), 5);
         assert_eq!(Saturday.number_days_from_sunday(), 6);
+    }
+
+    #[test]
+    fn display() {
+        assert_eq!(Monday.to_string(), "Monday");
+        assert_eq!(Tuesday.to_string(), "Tuesday");
+        assert_eq!(Wednesday.to_string(), "Wednesday");
+        assert_eq!(Thursday.to_string(), "Thursday");
+        assert_eq!(Friday.to_string(), "Friday");
+        assert_eq!(Saturday.to_string(), "Saturday");
+        assert_eq!(Sunday.to_string(), "Sunday");
     }
 }

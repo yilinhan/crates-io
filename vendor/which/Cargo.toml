@@ -12,7 +12,7 @@
 
 [package]
 name = "which"
-version = "3.1.0"
+version = "3.1.1"
 authors = ["Harry Fei <tiziyuanfang@gmail.com>"]
 description = "A Rust equivalent of Unix command \"which\". Locate installed executable in cross platforms."
 documentation = "https://docs.rs/which/"
@@ -22,7 +22,7 @@ categories = ["os", "filesystem"]
 license = "MIT"
 repository = "https://github.com/harryfei/which-rs.git"
 [dependencies.failure]
-version = "0.1.6"
+version = "0.1.7"
 features = ["std"]
 optional = true
 default-features = false

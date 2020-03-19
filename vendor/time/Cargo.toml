@@ -13,8 +13,9 @@
 [package]
 edition = "2018"
 name = "time"
-version = "0.2.6"
+version = "0.2.9"
 authors = ["Jacob Pratt <the.z.cuber@gmail.com>"]
+build = "build.rs"
 description = "Date and time library. Fully interoperable with the standard library. Mostly compatible with #![no_std]."
 readme = "README.md"
 keywords = ["date", "time", "calendar", "duration"]
@@ -23,6 +24,14 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/time-rs/time"
 [package.metadata.docs.rs]
 all-features = true
+[dependencies.cfg-if]
+version = "0.1.10"
+
+[dependencies.rand]
+version = "0.7"
+optional = true
+default-features = false
+
 [dependencies.rustversion]
 version = "1"
 
@@ -32,11 +41,29 @@ features = ["derive"]
 optional = true
 default-features = false
 
+[dependencies.standback]
+version = "0.2"
+default-features = false
+
 [dependencies.time-macros]
 version = "0.1"
+[build-dependencies.rustversion]
+version = "1"
 
 [features]
+__doc = []
 default = ["deprecated", "std"]
 deprecated = []
 panicking-api = []
-std = []
+std = ["libc", "winapi", "stdweb", "standback/std"]
+[target."cfg(cargo_web)".dependencies.stdweb]
+version = "0.4"
+optional = true
+default-features = false
+[target."cfg(unix)".dependencies.libc]
+version = "0.2"
+optional = true
+[target."cfg(windows)".dependencies.winapi]
+version = "0.3"
+features = ["minwinbase", "minwindef", "timezoneapi"]
+optional = true

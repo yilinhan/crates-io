@@ -1,7 +1,4 @@
-use crate::{
-    Duration,
-    Sign::{Negative, Positive, Zero},
-};
+use crate::Duration;
 use core::{
     cmp::{Ord, Ordering, PartialEq, PartialOrd},
     convert::TryInto,
@@ -30,7 +27,7 @@ use std::time::Instant as StdInstant;
 ///
 /// This implementation allows for operations with signed [`Duration`]s, but is
 /// otherwise identical to [`std::time::Instant`].
-#[cfg_attr(doc, doc(cfg(feature = "std")))]
+#[cfg_attr(docs, doc(cfg(feature = "std")))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Instant {
     /// Inner representation, using `std::time::Instant`.
@@ -56,12 +53,11 @@ impl Instant {
     /// created.
     ///
     /// ```rust
-    /// # use core::convert::TryInto;
-    /// # use time::{Duration, Instant};
+    /// # use time::{Instant, prelude::*};
     /// # use std::thread;
     /// let instant = Instant::now();
-    /// thread::sleep(Duration::milliseconds(100).try_into().unwrap());
-    /// assert!(instant.elapsed() >= Duration::milliseconds(100));
+    /// thread::sleep(100.std_milliseconds());
+    /// assert!(instant.elapsed() >= 100.milliseconds());
     /// ```
     #[inline(always)]
     pub fn elapsed(self) -> Duration {
@@ -73,23 +69,26 @@ impl Instant {
     /// underlying data structure), `None` otherwise.
     ///
     /// ```rust
-    /// # use time::{Duration, Instant};
+    /// # use time::{Instant, prelude::*};
     /// let now = Instant::now();
     /// assert_eq!(
-    ///     now.checked_add(Duration::seconds(5)),
-    ///     Some(now + Duration::seconds(5))
+    ///     now.checked_add(5.seconds()),
+    ///     Some(now + 5.seconds())
     /// );
     /// assert_eq!(
-    ///     now.checked_add(Duration::seconds(-5)),
-    ///     Some(now + Duration::seconds(-5))
+    ///     now.checked_add((-5).seconds()),
+    ///     Some(now + (-5).seconds())
     /// );
     /// ```
     #[inline]
     pub fn checked_add(self, duration: Duration) -> Option<Self> {
-        match duration.sign_abs_std() {
-            (Zero, _) => Some(self),
-            (Negative, duration) => self.inner.checked_sub(duration).map(From::from),
-            (Positive, duration) => self.inner.checked_add(duration).map(From::from),
+        if duration.is_zero() {
+            Some(self)
+        } else if duration.is_positive() {
+            self.inner.checked_add(duration.abs_std()).map(From::from)
+        } else {
+            // duration.is_negative()
+            self.inner.checked_sub(duration.abs_std()).map(From::from)
         }
     }
 
@@ -98,15 +97,15 @@ impl Instant {
     /// underlying data structure), `None` otherwise.
     ///
     /// ```rust
-    /// # use time::{Duration, Instant};
+    /// # use time::{Instant, prelude::*};
     /// let now = Instant::now();
     /// assert_eq!(
-    ///     now.checked_sub(Duration::seconds(5)),
-    ///     Some(now - Duration::seconds(5))
+    ///     now.checked_sub(5.seconds()),
+    ///     Some(now - 5.seconds())
     /// );
     /// assert_eq!(
-    ///     now.checked_sub(Duration::seconds(-5)),
-    ///     Some(now - Duration::seconds(-5))
+    ///     now.checked_sub((-5).seconds()),
+    ///     Some(now - (-5).seconds())
     /// );
     /// ```
     #[inline(always)]
@@ -118,7 +117,7 @@ impl Instant {
 #[allow(clippy::missing_docs_in_private_items)]
 impl Instant {
     #[inline(always)]
-    #[cfg(feature = "deprecated")]
+    #[cfg(v01_deprecated)]
     #[cfg_attr(tarpaulin, skip)]
     #[deprecated(since = "0.2.0", note = "Use `rhs - lhs`")]
     pub fn to(&self, later: Self) -> Duration {

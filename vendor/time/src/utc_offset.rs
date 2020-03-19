@@ -1,9 +1,10 @@
-#[cfg(not(feature = "std"))]
-use crate::alloc_prelude::*;
 use crate::{
-    format::{parse, ParseError, ParseResult, ParsedItems},
-    DeferredFormat, Duration,
+    format::{parse, ParsedItems},
+    internal_prelude::*,
 };
+use core::fmt::{self, Display};
+#[cfg(cargo_web)]
+use stdweb::js;
 
 /// An offset from UTC.
 ///
@@ -11,9 +12,9 @@ use crate::{
 /// may have incidental support that can change at any time without notice. If
 /// you need support outside this range, please file an issue with your use
 /// case.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(serde, derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
-    feature = "serde",
+    serde,
     serde(from = "crate::serde::UtcOffset", into = "crate::serde::UtcOffset")
 )]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -196,6 +197,66 @@ impl UtcOffset {
     pub(crate) const fn as_duration(self) -> Duration {
         Duration::seconds(self.seconds as i64)
     }
+
+    /// Obtain the system's UTC offset at a known moment in time. If the offset
+    /// cannot be determined, UTC is returned.
+    ///
+    /// ```rust,no_run
+    /// # use time::{UtcOffset, OffsetDateTime};
+    /// let unix_epoch = OffsetDateTime::unix_epoch();
+    /// let local_offset = UtcOffset::local_offset_at(unix_epoch);
+    /// println!("{}", local_offset.format("%z"));
+    /// ```
+    #[inline(always)]
+    #[cfg(std)]
+    pub fn local_offset_at(datetime: OffsetDateTime) -> Self {
+        try_local_offset_at(datetime).unwrap_or(Self::UTC)
+    }
+
+    /// Attempt to obtain the system's UTC offset at a known moment in time. If
+    /// the offset cannot be determined, an error is returned.
+    ///
+    /// ```rust,no_run
+    /// # use time::{UtcOffset, OffsetDateTime};
+    /// let unix_epoch = OffsetDateTime::unix_epoch();
+    /// let local_offset = UtcOffset::try_local_offset_at(unix_epoch);
+    /// assert!(local_offset.is_ok());
+    /// ```
+    #[inline(always)]
+    #[cfg(std)]
+    pub fn try_local_offset_at(datetime: OffsetDateTime) -> Result<Self, IndeterminateOffsetError> {
+        try_local_offset_at(datetime).ok_or_else(IndeterminateOffsetError::new)
+    }
+
+    /// Obtain the system's current UTC offset. If the offset cannot be
+    /// determined, UTC is returned.
+    ///
+    /// ```rust,no_run
+    /// # use time::UtcOffset;
+    /// let local_offset = UtcOffset::current_local_offset();
+    /// println!("{}", local_offset.format("%z"));
+    /// ```
+    #[inline(always)]
+    #[cfg(std)]
+    pub fn current_local_offset() -> Self {
+        let now = OffsetDateTime::now();
+        try_local_offset_at(now).unwrap_or(Self::UTC)
+    }
+
+    /// Attempt to obtain the system's current UTC offset. If the offset cannot
+    /// be determined, an error is returned.
+    ///
+    /// ```rust,no_run
+    /// # use time::UtcOffset;
+    /// let local_offset = UtcOffset::try_current_local_offset();
+    /// assert!(local_offset.is_ok());
+    /// ```
+    #[inline(always)]
+    #[cfg(std)]
+    pub fn try_current_local_offset() -> Result<Self, IndeterminateOffsetError> {
+        let now = OffsetDateTime::now();
+        try_local_offset_at(now).ok_or_else(IndeterminateOffsetError::new)
+    }
 }
 
 /// Methods that allow parsing and formatting the `UtcOffset`.
@@ -208,14 +269,10 @@ impl UtcOffset {
     /// assert_eq!(UtcOffset::hours(-2).format("%z"), "-0200");
     /// ```
     #[inline(always)]
-    pub fn format(self, format: &str) -> String {
-        DeferredFormat {
-            date: None,
-            time: None,
-            offset: Some(self),
-            format: crate::format::parse_fmt_string(format),
-        }
-        .to_string()
+    pub fn format(self, format: impl AsRef<str>) -> String {
+        DeferredFormat::new(format.as_ref())
+            .with_offset(self)
+            .to_string()
     }
 
     /// Attempt to parse the `UtcOffset` using the provided string.
@@ -226,14 +283,223 @@ impl UtcOffset {
     /// assert_eq!(UtcOffset::parse("-0200", "%z"), Ok(UtcOffset::hours(-2)));
     /// ```
     #[inline(always)]
-    pub fn parse(s: &str, format: &str) -> ParseResult<Self> {
-        Self::try_from_parsed_items(parse(s, format)?)
+    pub fn parse(s: impl AsRef<str>, format: impl AsRef<str>) -> ParseResult<Self> {
+        Self::try_from_parsed_items(parse(s.as_ref(), format.as_ref())?)
     }
 
     /// Given the items already parsed, attempt to create a `UtcOffset`.
     #[inline(always)]
     pub(crate) fn try_from_parsed_items(items: ParsedItems) -> ParseResult<Self> {
         items.offset.ok_or(ParseError::InsufficientInformation)
+    }
+}
+
+impl Display for UtcOffset {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let sign = if self.seconds < 0 { '-' } else { '+' };
+        let hours = self.as_hours().abs();
+        let minutes = self.as_minutes().abs() - hours as i16 * 60;
+        let seconds = self.as_seconds().abs() - hours as i32 * 3_600 - minutes as i32 * 60;
+
+        write!(f, "{}{}", sign, hours)?;
+
+        if minutes != 0 || seconds != 0 {
+            write!(f, ":{:02}", minutes)?;
+        }
+
+        if seconds != 0 {
+            write!(f, ":{:02}", seconds)?;
+        }
+
+        Ok(())
+    }
+}
+
+/// Attempt to obtain the system's UTC offset. If the offset cannot be
+/// determined, `None` is returned.
+#[cfg(std)]
+#[allow(clippy::too_many_lines)]
+fn try_local_offset_at(datetime: OffsetDateTime) -> Option<UtcOffset> {
+    cfg_if::cfg_if! {
+        if #[cfg(target_family = "unix")] {
+            use core::convert::TryInto;
+            use standback::mem::MaybeUninit;
+
+            /// Convert the given Unix timestamp to a `libc::tm`. Returns `None`
+            /// on any error.
+            fn timestamp_to_tm(timestamp: i64) -> Option<libc::tm> {
+                extern "C" {
+                    fn tzset();
+                }
+
+                let timestamp = timestamp.try_into().ok()?;
+
+                let mut tm = MaybeUninit::uninit();
+
+                // Update timezone information from system. `localtime_r` does
+                // not do this for us.
+                //
+                // Safety: tzset is thread-safe.
+                #[allow(unsafe_code)]
+                unsafe {
+                    tzset();
+                }
+
+                // Safety: We are calling a system API, which mutates the `tm`
+                // variable. If a null pointer is returned, an error occurred.
+                #[allow(unsafe_code)]
+                let tm_ptr = unsafe { libc::localtime_r(&timestamp, tm.as_mut_ptr()) };
+
+                if tm_ptr.is_null() {
+                    None
+                } else {
+                    // Safety: The value was initialized, as we no longer have a
+                    // null pointer.
+                    #[allow(unsafe_code)]
+                    {
+                        Some(unsafe { tm.assume_init() })
+                    }
+                }
+            }
+
+            let tm = timestamp_to_tm(datetime.timestamp())?;
+
+            // `tm_gmtoff` extension
+            #[cfg(not(target_os = "solaris"))]
+            {
+                tm.tm_gmtoff.try_into().ok().map(UtcOffset::seconds)
+            }
+
+            // No `tm_gmtoff` extension
+            #[cfg(target_os = "solaris")]
+            {
+                use crate::Date;
+                use core::convert::TryFrom;
+
+                let mut tm = tm;
+                if tm.tm_sec == 60 {
+                    // Leap seconds are not currently supported.
+                    tm.tm_sec = 59;
+                }
+
+                let local_timestamp =
+                    Date::try_from_yo(1900 + tm.tm_year, u16::try_from(tm.tm_yday).ok()? + 1)
+                        .ok()?
+                        .try_with_hms(
+                            tm.tm_hour.try_into().ok()?,
+                            tm.tm_min.try_into().ok()?,
+                            tm.tm_sec.try_into().ok()?,
+                        )
+                        .ok()?
+                        .assume_utc()
+                        .timestamp();
+
+                (local_timestamp - datetime.timestamp())
+                    .try_into()
+                    .ok()
+                    .map(UtcOffset::seconds)
+            }
+        } else if #[cfg(target_family = "windows")] {
+            use core::convert::TryInto;
+            use standback::mem::MaybeUninit;
+            use crate::offset;
+            use winapi::{
+                shared::minwindef::FILETIME,
+                um::{
+                    minwinbase::SYSTEMTIME,
+                    timezoneapi::{SystemTimeToFileTime, SystemTimeToTzSpecificLocalTime},
+                },
+            };
+
+            /// Convert a `SYSTEMTIME` to a `FILETIME`. Returns `None` if any
+            /// error occurred.
+            fn systemtime_to_filetime(systime: &SYSTEMTIME) -> Option<FILETIME> {
+                let mut ft = MaybeUninit::uninit();
+
+                // Safety: `SystemTimeToFileTime` is thread-safe. We are only
+                // assuming initialization if the call succeeded.
+                #[allow(unsafe_code)]
+                {
+                    if 0 == unsafe { SystemTimeToFileTime(systime, ft.as_mut_ptr()) } {
+                        // failed
+                        None
+                    } else {
+                        Some(unsafe { ft.assume_init() })
+                    }
+                }
+            }
+
+            /// Convert a `FILETIME` to an `i64`, representing a number of
+            /// seconds.
+            fn filetime_to_secs(filetime: &FILETIME) -> i64 {
+                /// FILETIME represents 100-nanosecond intervals
+                const FT_TO_SECS: i64 = 10_000_000;
+                ((filetime.dwHighDateTime as i64) << 32 | filetime.dwLowDateTime as i64) /
+                    FT_TO_SECS
+            }
+
+            /// Convert an `OffsetDateTime` to a `SYSTEMTIME`.
+            fn offset_to_systemtime(datetime: OffsetDateTime) -> SYSTEMTIME {
+                let (month, day_of_month) = datetime.to_offset(offset!(UTC)).month_day();
+                SYSTEMTIME {
+                    wYear: datetime.year() as u16,
+                    wMonth: month as u16,
+                    wDay: day_of_month as u16,
+                    wDayOfWeek: 0, // ignored
+                    wHour: datetime.hour() as u16,
+                    wMinute: datetime.minute() as u16,
+                    wSecond: datetime.second() as u16,
+                    wMilliseconds: datetime.millisecond(),
+                }
+            }
+
+            // This function falls back to UTC if any system call fails.
+            let systime_utc = offset_to_systemtime(datetime.to_offset(offset!(UTC)));
+
+            // Safety: `local_time` is only read if it is properly initialized, and
+            // `SystemTimeToTzSpecificLocalTime` is thread-safe.
+            #[allow(unsafe_code)]
+            let systime_local = unsafe {
+                let mut local_time = MaybeUninit::uninit();
+
+                if 0 == SystemTimeToTzSpecificLocalTime(
+                    core::ptr::null(), // use system's current timezone
+                    &systime_utc,
+                    local_time.as_mut_ptr(),
+                ) {
+                    // call failed
+                    return None;
+                } else {
+                    local_time.assume_init()
+                }
+            };
+
+            // Convert SYSTEMTIMEs to FILETIMEs so we can perform arithmetic on
+            // them.
+            let ft_system = systemtime_to_filetime(&systime_utc)?;
+            let ft_local = systemtime_to_filetime(&systime_local)?;
+
+            let diff_secs = filetime_to_secs(&ft_local) - filetime_to_secs(&ft_system);
+
+            diff_secs.try_into().ok().map(UtcOffset::seconds)
+        } else if #[cfg(cargo_web)] {
+            use stdweb::unstable::TryInto;
+
+            let timestamp_utc = datetime.timestamp();
+            let low_bits = (timestamp_utc & 0xFF_FF_FF_FF) as i32;
+            let high_bits = (timestamp_utc >> 32) as i32;
+
+            let timezone_offset = js! {
+                return
+                    new Date(((@{high_bits} << 32) + @{low_bits}) * 1000)
+                        .getTimezoneOffset() * -60;
+            };
+
+            timezone_offset.try_into().ok().map(UtcOffset::seconds)
+        } else {
+            None
+        }
     }
 }
 
@@ -314,8 +580,8 @@ mod test {
 
     #[test]
     fn as_duration() {
-        assert_eq!(offset!(+1).as_duration(), Duration::hours(1));
-        assert_eq!(offset!(-1).as_duration(), Duration::hours(-1));
+        assert_eq!(offset!(+1).as_duration(), 1.hours());
+        assert_eq!(offset!(-1).as_duration(), (-1).hours());
     }
 
     #[test]
@@ -348,5 +614,18 @@ mod test {
 
         assert_eq!(UtcOffset::parse("+0001", "%z"), Ok(offset!(+0:01)));
         assert_eq!(UtcOffset::parse("-0001", "%z"), Ok(offset!(-0:01)));
+    }
+
+    #[test]
+    fn display() {
+        assert_eq!(offset!(UTC).to_string(), "+0");
+        assert_eq!(offset!(+0:00:01).to_string(), "+0:00:01");
+        assert_eq!(offset!(-0:00:01).to_string(), "-0:00:01");
+        assert_eq!(offset!(+1).to_string(), "+1");
+        assert_eq!(offset!(-1).to_string(), "-1");
+        assert_eq!(offset!(+23:59).to_string(), "+23:59");
+        assert_eq!(offset!(-23:59).to_string(), "-23:59");
+        assert_eq!(offset!(+23:59:59).to_string(), "+23:59:59");
+        assert_eq!(offset!(-23:59:59).to_string(), "-23:59:59");
     }
 }

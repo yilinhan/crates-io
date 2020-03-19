@@ -12,13 +12,14 @@
 
 [package]
 name = "ctrlc"
-version = "3.1.3"
+version = "3.1.4"
 authors = ["Antti Keränen <detegr@gmail.com>"]
 exclude = ["/.travis.yml", "/appveyor.yml"]
 description = "Easy Ctrl-C handler for Rust projects"
 homepage = "https://github.com/Detegr/rust-ctrlc"
 documentation = "http://detegr.github.io/doc/ctrlc"
 keywords = ["ctrlc", "signal", "SIGINT"]
+categories = ["os"]
 license = "MIT/Apache-2.0"
 repository = "https://github.com/Detegr/rust-ctrlc.git"
 
@@ -30,7 +31,7 @@ harness = false
 [features]
 termination = []
 [target."cfg(unix)".dependencies.nix]
-version = "0.14"
+version = "0.17"
 [target."cfg(windows)".dependencies.winapi]
 version = "0.3"
 features = ["consoleapi", "handleapi", "synchapi", "winbase"]

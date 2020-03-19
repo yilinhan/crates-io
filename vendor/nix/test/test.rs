@@ -13,18 +13,28 @@ extern crate rand;
 extern crate sysctl;
 extern crate tempfile;
 
-#[cfg(any(target_os = "android", target_os = "linux"))]
-macro_rules! require_capability {
-    ($capname:ident) => {
-        use ::caps::{Capability, CapSet, has_cap};
-        use ::std::io::{self, Write};
+cfg_if! {
+    if #[cfg(any(target_os = "android", target_os = "linux"))] {
+        macro_rules! require_capability {
+            ($capname:ident) => {
+                use ::caps::{Capability, CapSet, has_cap};
+                use ::std::io::{self, Write};
 
-        if !has_cap(None, CapSet::Effective, Capability::$capname).unwrap() {
-            let stderr = io::stderr();
-            let mut handle = stderr.lock();
-            writeln!(handle, "Insufficient capabilities. Skipping test.")
-                .unwrap();
-            return;
+                if !has_cap(None, CapSet::Effective, Capability::$capname)
+                    .unwrap()
+                {
+                    let stderr = io::stderr();
+                    let mut handle = stderr.lock();
+                    writeln!(handle,
+                        "Insufficient capabilities. Skipping test.")
+                        .unwrap();
+                    return;
+                }
+            }
+        }
+    } else {
+        macro_rules! require_capability {
+            ($capname:ident) => {}
         }
     }
 }
@@ -61,6 +71,35 @@ macro_rules! skip_if_not_root {
     };
 }
 
+cfg_if! {
+    if #[cfg(any(target_os = "android", target_os = "linux"))] {
+        macro_rules! skip_if_seccomp {
+            ($name:expr) => {
+                if let Ok(s) = std::fs::read_to_string("/proc/self/status") {
+                    for l in s.lines() {
+                        let mut fields = l.split_whitespace();
+                        if fields.next() == Some("Seccomp:") &&
+                            fields.next() != Some("0")
+                        {
+                            use ::std::io::Write;
+                            let stderr = ::std::io::stderr();
+                            let mut handle = stderr.lock();
+                            writeln!(handle,
+                                "{} cannot be run in Seccomp mode.  Skipping test.",
+                                stringify!($name)).unwrap();
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        macro_rules! skip_if_seccomp {
+            ($name:expr) => {}
+        }
+    }
+}
+
 mod sys;
 mod test_dir;
 mod test_fcntl;
@@ -77,6 +116,9 @@ mod test_net;
 mod test_nix_path;
 mod test_poll;
 mod test_pty;
+#[cfg(any(target_os = "android",
+          target_os = "linux"))]
+mod test_sched;
 #[cfg(any(target_os = "android",
           target_os = "freebsd",
           target_os = "ios",

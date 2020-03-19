@@ -13,7 +13,7 @@
 [package]
 edition = "2018"
 name = "thiserror"
-version = "1.0.10"
+version = "1.0.11"
 authors = ["David Tolnay <dtolnay@gmail.com>"]
 description = "derive(Error)"
 documentation = "https://docs.rs/thiserror"
@@ -22,7 +22,7 @@ categories = ["rust-patterns"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/dtolnay/thiserror"
 [dependencies.thiserror-impl]
-version = "=1.0.10"
+version = "=1.0.11"
 [dev-dependencies.anyhow]
 version = "1.0"
 

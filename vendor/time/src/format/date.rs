@@ -7,11 +7,9 @@ use super::{
         consume_padding, try_consume_digits, try_consume_digits_in_range, try_consume_exact_digits,
         try_consume_exact_digits_in_range, try_consume_first_match,
     },
-    Padding, ParseError, ParseResult, ParsedItems,
+    Padding, ParsedItems,
 };
-#[cfg(not(feature = "std"))]
-use crate::alloc_prelude::*;
-use crate::{shim::*, Date, Sign, Weekday};
+use crate::internal_prelude::*;
 use core::{
     fmt::{self, Formatter},
     num::{NonZeroU16, NonZeroU8},
@@ -20,13 +18,7 @@ use core::{
 /// Array of weekdays that corresponds to the localized values. This can be
 /// zipped via an iterator to perform parsing easily.
 const WEEKDAYS: [Weekday; 7] = [
-    Weekday::Monday,
-    Weekday::Tuesday,
-    Weekday::Wednesday,
-    Weekday::Thursday,
-    Weekday::Friday,
-    Weekday::Saturday,
-    Weekday::Sunday,
+    Monday, Tuesday, Wednesday, Thursday, Friday, Saturday, Sunday,
 ];
 
 /// Full weekday names
@@ -141,7 +133,7 @@ pub(crate) fn parse_C(items: &mut ParsedItems, s: &mut &str, padding: Padding) -
     items.year = (try_consume_digits::<i32, _>(s, (2 - padding_length)..=(3 - padding_length))
         .ok_or(ParseError::InvalidYear)?
         * 100
-        + items.year.unwrap_or(0).rem_euclid_shim(100))
+        + items.year.unwrap_or(0).rem_euclid(100))
     .into();
 
     Ok(())
@@ -166,12 +158,7 @@ pub(crate) fn parse_d(items: &mut ParsedItems, s: &mut &str, padding: Padding) -
 /// Week-based year, last two digits (`00`-`99`)
 #[inline(always)]
 pub(crate) fn fmt_g(f: &mut Formatter<'_>, date: Date, padding: Padding) -> fmt::Result {
-    pad!(
-        f,
-        padding(Zero),
-        2,
-        date.iso_year_week().0.rem_euclid_shim(100)
-    )
+    pad!(f, padding(Zero), 2, date.iso_year_week().0.rem_euclid(100))
 }
 
 /// Week-based year, last two digits (`00`-`99`)
@@ -200,13 +187,7 @@ pub(crate) fn fmt_G(f: &mut Formatter<'_>, date: Date, padding: Padding) -> fmt:
 /// Week-based year
 #[inline(always)]
 pub(crate) fn parse_G(items: &mut ParsedItems, s: &mut &str, padding: Padding) -> ParseResult<()> {
-    let sign = try_consume_first_match(
-        s,
-        [("+", Sign::Positive), ("-", Sign::Negative)]
-            .iter()
-            .cloned(),
-    )
-    .unwrap_or(Sign::Positive);
+    let sign = try_consume_first_match(s, [("+", 1), ("-", -1)].iter().cloned()).unwrap_or(1);
 
     consume_padding(s, padding.default_to(Padding::Zero), 4);
 
@@ -349,7 +330,7 @@ pub(crate) fn parse_W(items: &mut ParsedItems, s: &mut &str, padding: Padding) -
 /// Last two digits of year (`00`-`99`)
 #[inline(always)]
 pub(crate) fn fmt_y(f: &mut Formatter<'_>, date: Date, padding: Padding) -> fmt::Result {
-    pad!(f, padding(Zero), 2, date.year().rem_euclid_shim(100))
+    pad!(f, padding(Zero), 2, date.year().rem_euclid(100))
 }
 
 /// Last two digits of year (`00`-`99`)
@@ -378,17 +359,13 @@ pub(crate) fn fmt_Y(f: &mut Formatter<'_>, date: Date, padding: Padding) -> fmt:
 /// Full year
 #[inline(always)]
 pub(crate) fn parse_Y(items: &mut ParsedItems, s: &mut &str, padding: Padding) -> ParseResult<()> {
-    let sign = try_consume_first_match(
-        s,
-        [("+", Sign::Positive), ("-", Sign::Negative)]
-            .iter()
-            .cloned(),
-    )
-    .unwrap_or(Sign::Positive);
+    let (sign, max_digits) =
+        try_consume_first_match(s, [("+", (1, 6)), ("-", (-1, 6))].iter().cloned())
+            .unwrap_or((1, 4));
 
-    consume_padding(s, padding.default_to(Padding::Zero), 4);
+    consume_padding(s, padding.default_to(Padding::Zero), 3);
 
-    items.year = try_consume_digits_in_range(s, 1..=6, -100_000..=100_000)
+    items.year = try_consume_digits_in_range(s, 1..=max_digits, 0..=100_000)
         .map(|v: i32| sign * v)
         .ok_or(ParseError::InvalidYear)?
         .into();

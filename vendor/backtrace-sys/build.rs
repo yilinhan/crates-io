@@ -7,12 +7,14 @@ use std::path::PathBuf;
 fn main() {
     let target = env::var("TARGET").unwrap();
 
-    if target.contains("msvc") || // libbacktrace isn't used on MSVC windows
+    if !cfg!(feature = "backtrace-sys") || // without this feature, this crate does nothing
+        target.contains("msvc") || // libbacktrace isn't used on MSVC windows
         target.contains("emscripten") || // no way this will ever compile for emscripten
         target.contains("cloudabi") ||
+        target.contains("hermit") ||
         target.contains("wasm32") ||
-        target.contains("fuchsia")
-    // fuchsia uses external out-of-process symbolization
+        target.contains("fuchsia") ||
+        target.contains("uclibc")
     {
         println!("cargo:rustc-cfg=empty");
         return;
@@ -29,9 +31,18 @@ fn main() {
         .file("src/libbacktrace/dwarf.c")
         .file("src/libbacktrace/fileline.c")
         .file("src/libbacktrace/posix.c")
-        .file("src/libbacktrace/read.c")
         .file("src/libbacktrace/sort.c")
         .file("src/libbacktrace/state.c");
+
+    // `mmap` does not exist on Windows, so we use
+    // the less efficient `read`-based code.
+    // Using `mmap` on macOS causes weird isseus - see
+    // https://github.com/rust-lang/rust/pull/45866
+    if target.contains("windows") || target.contains("darwin") {
+        build.file("src/libbacktrace/read.c");
+    } else {
+        build.file("src/libbacktrace/mmapio.c");
+    }
 
     // No need to have any symbols reexported form shared objects
     build.flag("-fvisibility=hidden");

@@ -59,7 +59,7 @@
 //! Chrono currently uses
 //! the [`time::Duration`](https://docs.rs/time/0.1.40/time/struct.Duration.html) type
 //! from the `time` crate to represent the magnitude of a time span.
-//! Since this has the same name to the newer, standard type for duration,
+//! Since this has the same name as the newer, standard type for duration,
 //! the reference will refer this type as `OldDuration`.
 //! Note that this is an "accurate" duration represented as seconds and
 //! nanoseconds and does not represent "nominal" components such as days or
@@ -424,9 +424,9 @@ extern crate serde as serdelib;
 #[cfg(test)]
 #[macro_use]
 extern crate doc_comment;
-#[cfg(all(target_arch = "wasm32", feature="wasmbind"))]
+#[cfg(all(target_arch = "wasm32", not(target_os = "wasi"), feature = "wasmbind"))]
 extern crate wasm_bindgen;
-#[cfg(all(target_arch = "wasm32", feature="wasmbind"))]
+#[cfg(all(target_arch = "wasm32", not(target_os = "wasi"), feature = "wasmbind"))]
 extern crate js_sys;
 #[cfg(feature = "bench")]
 extern crate test;
@@ -491,6 +491,10 @@ pub mod naive {
     #[allow(deprecated)]
     pub use self::datetime::rustc_serialize::TsSeconds;
 
+    #[cfg(feature = "__internal_bench")]
+    #[doc(hidden)]
+    pub use self::internals::YearFlags as __BenchYearFlags;
+
 
     /// Serialization/Deserialization of naive types in alternate formats
     ///
@@ -509,6 +513,10 @@ mod date;
 mod datetime;
 pub mod format;
 mod round;
+
+#[cfg(feature = "__internal_bench")]
+#[doc(hidden)]
+pub use naive::__BenchYearFlags;
 
 /// Serialization/Deserialization in alternate formats
 ///
@@ -962,6 +970,9 @@ pub trait Datelike: Sized {
     /// assert_eq!(NaiveDate::from_ymd(0, 1, 1).num_days_from_ce(), -365);
     /// ```
     fn num_days_from_ce(&self) -> i32 {
+        // See test_num_days_from_ce_against_alternative_impl below for a more straightforward
+        // implementation.
+
         // we know this wouldn't overflow since year is limited to 1/2^13 of i32's full range.
         let mut year = self.year() - 1;
         let mut ndays = 0;
@@ -1061,5 +1072,54 @@ fn test_readme_doomsday() {
         let weekday = d30.weekday();
         let other_dates = [d4, d6, d8, d10, d12, d59, d95, d711, d117];
         assert!(other_dates.iter().all(|d| d.weekday() == weekday));
+    }
+}
+
+/// Tests `Datelike::num_days_from_ce` against an alternative implementation.
+///
+/// The alternative implementation is not as short as the current one but it is simpler to
+/// understand, with less unexplained magic constants.
+#[test]
+fn test_num_days_from_ce_against_alternative_impl() {
+    /// Returns the number of multiples of `div` in the range `start..end`.
+    ///
+    /// If the range `start..end` is back-to-front, i.e. `start` is greater than `end`, the
+    /// behaviour is defined by the following equation:
+    /// `in_between(start, end, div) == - in_between(end, start, div)`.
+    ///
+    /// When `div` is 1, this is equivalent to `end - start`, i.e. the length of `start..end`.
+    ///
+    /// # Panics
+    ///
+    /// Panics if `div` is not positive.
+    fn in_between(start: i32, end: i32, div: i32) -> i32 {
+        assert!(div > 0, "in_between: nonpositive div = {}", div);
+        let start = (start.div_euclid(div), start.rem_euclid(div));
+        let   end = (  end.div_euclid(div),   end.rem_euclid(div));
+        // The lowest multiple of `div` greater than or equal to `start`, divided.
+        let start = start.0 + (start.1 != 0) as i32;
+        // The lowest multiple of `div` greater than or equal to   `end`, divided.
+        let   end =   end.0 + (  end.1 != 0) as i32;
+        end - start
+    }
+
+    /// Alternative implementation to `Datelike::num_days_from_ce`
+    fn num_days_from_ce<Date: Datelike>(date: &Date) -> i32 {
+        let year = date.year();
+        let diff = move |div| in_between(1, year, div);
+        // 365 days a year, one more in leap years. In the gregorian calendar, leap years are all
+        // the multiples of 4 except multiples of 100 but including multiples of 400.
+        date.ordinal() as i32 + 365 * diff(1) + diff(4) - diff(100) + diff(400)
+    }
+
+    use num_iter::range_inclusive;
+
+    for year in range_inclusive(naive::MIN_DATE.year(), naive::MAX_DATE.year()) {
+        let jan1_year = NaiveDate::from_ymd(year, 1, 1);
+        assert_eq!(jan1_year.num_days_from_ce(), num_days_from_ce(&jan1_year),
+            "on {:?}", jan1_year);
+        let mid_year = jan1_year + Duration::days(133);
+        assert_eq!(mid_year.num_days_from_ce(), num_days_from_ce(&mid_year),
+            "on {:?}", mid_year);
     }
 }

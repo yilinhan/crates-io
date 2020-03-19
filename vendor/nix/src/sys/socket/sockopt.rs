@@ -173,7 +173,7 @@ macro_rules! sockopt_impl {
     };
 
     (GetOnly, $name:ident, $level:path, $flag:path, $ty:ty, $getter:ty) => {
-        #[derive(Copy, Clone, Debug)]
+        #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
         pub struct $name;
 
         getsockopt_impl!($name, $level, $flag, $ty, $getter);
@@ -184,14 +184,14 @@ macro_rules! sockopt_impl {
     };
 
     (SetOnly, $name:ident, $level:path, $flag:path, $ty:ty, $setter:ty) => {
-        #[derive(Copy, Clone, Debug)]
+        #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
         pub struct $name;
 
         setsockopt_impl!($name, $level, $flag, $ty, $setter);
     };
 
     (Both, $name:ident, $level:path, $flag:path, $ty:ty, $getter:ty, $setter:ty) => {
-        #[derive(Copy, Clone, Debug)]
+        #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
         pub struct $name;
 
         setsockopt_impl!($name, $level, $flag, $ty, $setter);
@@ -411,7 +411,7 @@ unsafe impl<T> Get<T> for GetStruct<T> {
     }
 
     unsafe fn unwrap(self) -> T {
-        assert!(self.len as usize == mem::size_of::<T>(), "invalid getsockopt implementation");
+        assert_eq!(self.len as usize, mem::size_of::<T>(), "invalid getsockopt implementation");
         self.val
     }
 }
@@ -423,7 +423,7 @@ struct SetStruct<'a, T: 'static> {
 
 unsafe impl<'a, T> Set<'a, T> for SetStruct<'a, T> {
     fn new(ptr: &'a T) -> SetStruct<'a, T> {
-        SetStruct { ptr: ptr }
+        SetStruct { ptr }
     }
 
     fn ffi_ptr(&self) -> *const c_void {
@@ -458,7 +458,7 @@ unsafe impl Get<bool> for GetBool {
     }
 
     unsafe fn unwrap(self) -> bool {
-        assert!(self.len as usize == mem::size_of::<c_int>(), "invalid getsockopt implementation");
+        assert_eq!(self.len as usize, mem::size_of::<c_int>(), "invalid getsockopt implementation");
         self.val != 0
     }
 }
@@ -505,7 +505,7 @@ unsafe impl Get<u8> for GetU8 {
     }
 
     unsafe fn unwrap(self) -> u8 {
-        assert!(self.len as usize == mem::size_of::<u8>(), "invalid getsockopt implementation");
+        assert_eq!(self.len as usize, mem::size_of::<u8>(), "invalid getsockopt implementation");
         self.val as u8
     }
 }
@@ -552,7 +552,7 @@ unsafe impl Get<usize> for GetUsize {
     }
 
     unsafe fn unwrap(self) -> usize {
-        assert!(self.len as usize == mem::size_of::<c_int>(), "invalid getsockopt implementation");
+        assert_eq!(self.len as usize, mem::size_of::<c_int>(), "invalid getsockopt implementation");
         self.val as usize
     }
 }
@@ -644,7 +644,7 @@ mod test {
 
         let (a, b) = socketpair(AddressFamily::Unix, SockType::Stream, None, SockFlag::empty()).unwrap();
         let a_type = getsockopt(a, super::SockType).unwrap();
-        assert!(a_type == SockType::Stream);
+        assert_eq!(a_type, SockType::Stream);
         close(a).unwrap();
         close(b).unwrap();
     }
@@ -656,7 +656,7 @@ mod test {
 
         let s = socket(AddressFamily::Inet, SockType::Datagram, SockFlag::empty(), None).unwrap();
         let s_type = getsockopt(s, super::SockType).unwrap();
-        assert!(s_type == SockType::Datagram);
+        assert_eq!(s_type, SockType::Datagram);
         close(s).unwrap();
     }
 

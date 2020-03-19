@@ -1,6 +1,4 @@
-#[cfg(not(feature = "std"))]
-use crate::alloc_prelude::*;
-use crate::format::ParseError;
+use crate::internal_prelude::*;
 use core::fmt;
 
 /// A unified error type for anything returned by a method in the time crate.
@@ -10,16 +8,16 @@ use core::fmt;
 // Boxing the `ComponentRangeError` reduces the size of `Error` from 72 bytes to
 // 16.
 #[allow(clippy::missing_docs_in_private_items)] // variants only
-#[rustversion::attr(since(1.40), non_exhaustive)]
-#[rustversion::attr(
-    before(1.40),
-    doc("This enum is non-exhaustive. Additional variants may be added at any time.")
-)]
+#[cfg_attr(supports_non_exhaustive, non_exhaustive)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     ConversionRange(ConversionRangeError),
     ComponentRange(Box<ComponentRangeError>),
     Parse(ParseError),
+    IndeterminateOffset(IndeterminateOffsetError),
+    #[cfg(not(supports_non_exhaustive))]
+    #[doc(hidden)]
+    __NonExhaustive,
 }
 
 impl fmt::Display for Error {
@@ -29,31 +27,42 @@ impl fmt::Display for Error {
             Error::ConversionRange(e) => e.fmt(f),
             Error::ComponentRange(e) => e.fmt(f),
             Error::Parse(e) => e.fmt(f),
+            Error::IndeterminateOffset(e) => e.fmt(f),
+            #[cfg(not(supports_non_exhaustive))]
+            Error::__NonExhaustive => unreachable!(),
         }
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for Error {}
+#[cfg(std)]
+impl std::error::Error for Error {
+    #[inline(always)]
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::ConversionRange(err) => Some(err),
+            Error::ComponentRange(box_err) => Some(box_err.as_ref()),
+            Error::Parse(err) => Some(err),
+            Error::IndeterminateOffset(err) => Some(err),
+            #[cfg(not(supports_non_exhaustive))]
+            Error::__NonExhaustive => unreachable!(),
+        }
+    }
+}
 
 /// An error type indicating that a conversion failed because the target type
 /// could not store the initial value.
-#[allow(clippy::missing_docs_in_private_items)]
-#[rustversion::attr(since(1.40), non_exhaustive)]
-#[rustversion::attr(
-    before(1.40),
-    doc("This struct is non-exhaustive. Additional variants may be added at any time.")
-)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ConversionRangeError {
     #[allow(clippy::missing_docs_in_private_items)]
-    nonexhaustive: (),
+    __non_exhaustive: (),
 }
 
 impl ConversionRangeError {
     #[allow(clippy::missing_docs_in_private_items)]
     pub(crate) const fn new() -> Self {
-        Self { nonexhaustive: () }
+        Self {
+            __non_exhaustive: (),
+        }
     }
 }
 
@@ -64,7 +73,7 @@ impl fmt::Display for ConversionRangeError {
     }
 }
 
-#[cfg(feature = "std")]
+#[cfg(std)]
 impl std::error::Error for ConversionRangeError {}
 
 impl From<ConversionRangeError> for Error {
@@ -78,11 +87,6 @@ impl From<ConversionRangeError> for Error {
 /// range, causing a failure.
 // i64 is the narrowest type fitting all use cases. This eliminates the need
 // for a type parameter.
-#[rustversion::attr(since(1.40), non_exhaustive)]
-#[rustversion::attr(
-    before(1.40),
-    doc("This struct is non-exhaustive. Additional fields may be added at any time.")
-)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ComponentRangeError {
     /// Name of the component.
@@ -125,12 +129,45 @@ impl From<ComponentRangeError> for Error {
     }
 }
 
-#[cfg(feature = "std")]
+#[cfg(std)]
 impl std::error::Error for ComponentRangeError {}
 
 impl From<ParseError> for Error {
     #[inline(always)]
     fn from(original: ParseError) -> Self {
         Error::Parse(original)
+    }
+}
+
+/// The system's UTC offset could not be determined at the given datetime.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct IndeterminateOffsetError {
+    #[allow(clippy::missing_docs_in_private_items)]
+    __non_exhaustive: (),
+}
+
+impl IndeterminateOffsetError {
+    #[allow(clippy::missing_docs_in_private_items, dead_code)]
+    pub(crate) const fn new() -> Self {
+        Self {
+            __non_exhaustive: (),
+        }
+    }
+}
+
+impl fmt::Display for IndeterminateOffsetError {
+    #[inline(always)]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("The system's UTC offset could not be determined")
+    }
+}
+
+#[cfg(std)]
+impl std::error::Error for IndeterminateOffsetError {}
+
+impl From<IndeterminateOffsetError> for Error {
+    #[inline(always)]
+    fn from(original: IndeterminateOffsetError) -> Self {
+        Error::IndeterminateOffset(original)
     }
 }

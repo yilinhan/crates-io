@@ -24,6 +24,7 @@ impl TryFrom<PrimitiveDateTime> for crate::PrimitiveDateTime {
     }
 }
 
+// TODO(0.3) Store the offset as well.
 impl From<crate::OffsetDateTime> for PrimitiveDateTime {
     #[inline]
     fn from(original: crate::OffsetDateTime) -> Self {
@@ -42,7 +43,6 @@ impl TryFrom<PrimitiveDateTime> for crate::OffsetDateTime {
     fn try_from(original: PrimitiveDateTime) -> Result<Self, Self::Error> {
         let date = crate::serde::Date(original.0, original.1);
         let time = crate::serde::Time(original.2, original.3);
-        Ok(crate::PrimitiveDateTime::new(date.try_into()?, time.into())
-            .using_offset(crate::UtcOffset::UTC))
+        Ok(crate::PrimitiveDateTime::new(date.try_into()?, time.into()).assume_utc())
     }
 }

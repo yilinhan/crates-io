@@ -37,9 +37,7 @@ pub(crate) mod parse;
 pub(crate) mod parse_items;
 pub(crate) mod time;
 
-#[cfg(not(feature = "std"))]
-use crate::alloc_prelude::*;
-use crate::{Date, Time, UtcOffset};
+use crate::internal_prelude::*;
 use core::fmt::{self, Display, Formatter};
 #[allow(unreachable_pub)] // rust-lang/rust#64762
 pub use parse::ParseError;
@@ -49,8 +47,8 @@ pub(crate) use parse_items::{parse_fmt_string, try_parse_fmt_string};
 /// Checks if a user-provided formatting string is valid. If it isn't, a
 /// description of the error is returned.
 #[inline(always)]
-pub fn validate_format_string(s: &str) -> Result<(), String> {
-    try_parse_fmt_string(s).map(|_| ())
+pub fn validate_format_string(s: impl AsRef<str>) -> Result<(), String> {
+    try_parse_fmt_string(s.as_ref()).map(|_| ())
 }
 
 /// The type of padding to use when formatting.
@@ -78,72 +76,46 @@ impl Padding {
 }
 
 /// Specifiers are similar to C's `strftime`, with some omissions and changes.
+///
+/// See the table in `lib.rs` for a description of each specifier (and
+/// equivalences for combination specifiers).
 #[allow(
     non_snake_case,
     non_camel_case_types,
-    clippy::missing_docs_in_private_items // Inner fields
+    clippy::missing_docs_in_private_items
 )]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum Specifier {
-    /// Abbreviated weekday name
     a,
-    /// Full weekday name
     A,
-    /// Abbreviated month name
     b,
-    /// Full month name
     B,
-    /// Date and time representation
     c,
-    /// Year divided by 100 and truncated to integer (`00`-`99`)
     C { padding: Padding },
-    /// Day of the month, zero-padded (`01`-`31`)
     d { padding: Padding },
-    /// Short MM/DD/YY date, equivalent to `%m/%d/%y`
     D,
-    /// Short YYYY-MM-DD date, equivalent to `%Y-%m-%d`
     F,
-    /// Week-based year, last two digits (`00`-`99`)
     g { padding: Padding },
-    /// Week-based year
     G { padding: Padding },
-    /// Hour in 24h format (`00`-`23`)
     H { padding: Padding },
-    /// Hour in 12h format (`01`-`12`)
     I { padding: Padding },
-    /// Day of the year (`001`-`366`)
     j { padding: Padding },
-    /// Month as a decimal number (`01`-`12`)
     m { padding: Padding },
-    /// Minute (`00`-`59`)
     M { padding: Padding },
-    /// `am` or `pm` designation
+    N,
     p,
-    /// `AM` or `PM` designation
     P,
-    /// 12-hour clock time
     r,
-    /// 24-hour HH:MM time, equivalent to `%H:%M`
     R,
-    /// Second (`00`-`59`)
     S { padding: Padding },
-    /// ISO 8601 time format (HH:MM:SS), equivalent to `%H:%M:%S`
     T,
-    /// ISO 8601 weekday as number with Monday as 1 (`1`-`7`)
     u,
-    /// Week number with the first Sunday as the first day of week one (`00`-`53`)
     U { padding: Padding },
-    /// ISO 8601 week number (`01`-`53`)
     V { padding: Padding },
-    /// Weekday as a decimal number with Sunday as 0 (`0`-`6`)
     w,
-    /// Week number with the first Monday as the first day of week one (`00`-`53`)
     W { padding: Padding },
-    /// Year, last two digits (`00`-`99`)
     y { padding: Padding },
-    /// Year
     Y { padding: Padding },
-    /// UTC offset
     z,
 }
 
@@ -158,8 +130,6 @@ fn format_specifier(
     specifier: Specifier,
 ) -> fmt::Result {
     /// Push the provided specifier to the list of items.
-    // TODO (future) Some way to concatenate identifiers/paths without hacks
-    // would be super!
     macro_rules! specifier {
         ($type:ident :: $specifier_fn:ident ( $specifier:ident $(, $param:expr)? )) => {
             $type::$specifier_fn(
@@ -226,6 +196,7 @@ fn format_specifier(
         j { padding } => specifier!(date::fmt_j(j, padding)),
         m { padding } => specifier!(date::fmt_m(m, padding)),
         M { padding } => specifier!(time::fmt_M(M, padding)),
+        N => specifier!(time::fmt_N(N)),
         p => specifier!(time::fmt_p(p)),
         P => specifier!(time::fmt_P(P)),
         r => {
@@ -278,13 +249,49 @@ pub(crate) enum FormatItem<'a> {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct DeferredFormat<'a> {
     /// The `Date` to use for formatting.
-    pub(crate) date: Option<Date>,
+    date: Option<Date>,
     /// The `Time` to use for formatting.
-    pub(crate) time: Option<Time>,
+    time: Option<Time>,
     /// The `UtcOffset` to use for formatting.
-    pub(crate) offset: Option<UtcOffset>,
+    offset: Option<UtcOffset>,
     /// The list of items used to display the item.
-    pub(crate) format: Vec<FormatItem<'a>>,
+    format: Vec<FormatItem<'a>>,
+}
+
+impl<'a> DeferredFormat<'a> {
+    /// Create a new `DeferredFormat` with the provided formatting string.
+    pub(crate) fn new(format: &'a str) -> Self {
+        Self {
+            date: None,
+            time: None,
+            offset: None,
+            format: parse_fmt_string(format),
+        }
+    }
+
+    /// Provide the `Date` component.
+    pub(crate) fn with_date(self, date: Date) -> Self {
+        Self {
+            date: Some(date),
+            ..self
+        }
+    }
+
+    /// Provide the `Time` component.
+    pub(crate) fn with_time(self, time: Time) -> Self {
+        Self {
+            time: Some(time),
+            ..self
+        }
+    }
+
+    /// Provide the `UtCOffset` component.
+    pub(crate) fn with_offset(self, offset: UtcOffset) -> Self {
+        Self {
+            offset: Some(offset),
+            ..self
+        }
+    }
 }
 
 impl Display for DeferredFormat<'_> {

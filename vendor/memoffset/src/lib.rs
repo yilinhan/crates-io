@@ -57,12 +57,21 @@
 //! ```
 
 #![no_std]
+#![cfg_attr(
+    feature = "unstable_const",
+    feature(
+        ptr_offset_from,
+        const_ptr_offset_from,
+        const_transmute,
+        const_raw_ptr_deref
+    )
+)]
 
 #[macro_use]
-#[cfg(memoffset_doctests)]
+#[cfg(doctests)]
 #[cfg(doctest)]
 extern crate doc_comment;
-#[cfg(memoffset_doctests)]
+#[cfg(doctests)]
 #[cfg(doctest)]
 doctest!("../README.md");
 

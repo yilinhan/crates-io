@@ -1,9 +1,7 @@
 //! Parsing for various types.
 
 use super::{parse_fmt_string, FormatItem, Padding, Specifier};
-#[cfg(not(feature = "std"))]
-use crate::alloc_prelude::*;
-use crate::{shim::*, ComponentRangeError, UtcOffset, Weekday};
+use crate::internal_prelude::*;
 use core::{
     fmt::{self, Display, Formatter},
     num::{NonZeroU16, NonZeroU8},
@@ -14,14 +12,12 @@ use core::{
 /// Helper type to avoid repeating the error type.
 pub(crate) type ParseResult<T> = Result<T, ParseError>;
 
-/// An error ocurred while parsing.
-#[rustversion::attr(since(1.40), non_exhaustive)]
-#[rustversion::attr(
-    before(1.40),
-    doc("This enum is non-exhaustive. Additional variants may be added at any time.")
-)]
+/// An error occurred while parsing.
+#[cfg_attr(supports_non_exhaustive, non_exhaustive)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ParseError {
+    /// The nanosecond present was not valid.
+    InvalidNanosecond,
     /// The second present was not valid.
     InvalidSecond,
     /// The minute present was not valid.
@@ -61,6 +57,9 @@ pub enum ParseError {
     InsufficientInformation,
     /// A component was out of range.
     ComponentOutOfRange(Box<ComponentRangeError>),
+    #[cfg(not(supports_non_exhaustive))]
+    #[doc(hidden)]
+    __NonExhaustive,
 }
 
 impl From<ComponentRangeError> for ParseError {
@@ -75,6 +74,7 @@ impl Display for ParseError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         use ParseError::*;
         match self {
+            InvalidNanosecond => f.write_str("invalid nanosecond"),
             InvalidSecond => f.write_str("invalid second"),
             InvalidMinute => f.write_str("invalid minute"),
             InvalidHour => f.write_str("invalid hour"),
@@ -96,12 +96,21 @@ impl Display for ParseError {
                 f.write_str("insufficient information provided to create the requested type")
             }
             ComponentOutOfRange(e) => write!(f, "{}", e),
+            #[cfg(not(supports_non_exhaustive))]
+            __NonExhaustive => unreachable!(),
         }
     }
 }
 
-#[cfg(feature = "std")]
-impl std::error::Error for ParseError {}
+#[cfg(std)]
+impl std::error::Error for ParseError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            ParseError::ComponentOutOfRange(e) => Some(e.as_ref()),
+            _ => None,
+        }
+    }
+}
 
 /// A value representing a time that is either "AM" or "PM".
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,6 +150,8 @@ pub(crate) struct ParsedItems {
     pub(crate) minute: Option<u8>,
     /// Second within the minute.
     pub(crate) second: Option<u8>,
+    /// Nanosecond within the second.
+    pub(crate) nanosecond: Option<u32>,
     /// The UTC offset of the datetime.
     pub(crate) offset: Option<UtcOffset>,
     /// Whether the hour indicated is AM or PM.
@@ -165,6 +176,7 @@ impl ParsedItems {
             hour_24: None,
             minute: None,
             second: None,
+            nanosecond: None,
             offset: None,
             am_pm: None,
         }
@@ -266,7 +278,7 @@ pub(crate) fn try_consume_digits_in_range<T: FromStr + PartialOrd>(
     num_digits: impl RangeBounds<usize>,
     range: impl RangeBounds<T>,
 ) -> Option<T> {
-    try_consume_digits(s, num_digits).filter(|value| range_contains(&range, value))
+    try_consume_digits(s, num_digits).filter(|value| range.contains(value))
 }
 
 /// Attempt to consume an exact number of digits.
@@ -293,6 +305,11 @@ pub(crate) fn try_consume_exact_digits<T: FromStr>(
             return None;
         }
 
+        // Ensure the string is long enough to perform the slicing.
+        if (num_digits - pad_size) > s.len() {
+            return None;
+        }
+
         // Because we're only dealing with ASCII digits here, we know that the
         // length is equal to the number of bytes, as ASCII values are always one
         // byte in Unicode.
@@ -311,7 +328,7 @@ pub(crate) fn try_consume_exact_digits_in_range<T: FromStr + PartialOrd, U: Rang
     range: U,
     padding: Padding,
 ) -> Option<T> {
-    try_consume_exact_digits(s, num_digits, padding).filter(|value| range_contains(&range, value))
+    try_consume_exact_digits(s, num_digits, padding).filter(|value| range.contains(value))
 }
 
 /// Consume all leading padding up to the number of characters.
@@ -411,6 +428,7 @@ pub(crate) fn parse(s: &str, format: &str) -> ParseResult<ParsedItems> {
                     j { padding } => parse!(date::parse_j(padding)),
                     M { padding } => parse!(time::parse_M(padding)),
                     m { padding } => parse!(date::parse_m(padding)),
+                    N => parse!(time::parse_N),
                     p => parse!(time::parse_p),
                     P => parse!(time::parse_P),
                     r => {

@@ -12,14 +12,14 @@
 
 [package]
 name = "failure_derive"
-version = "0.1.6"
+version = "0.1.7"
 authors = ["Without Boats <woboats@gmail.com>"]
 build = "build.rs"
 description = "derives for the failure crate"
 homepage = "https://rust-lang-nursery.github.io/failure/"
 documentation = "https://docs.rs/failure"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/withoutboats/failure_derive"
+repository = "https://github.com/rust-lang-nursery/failure"
 
 [lib]
 proc-macro = true

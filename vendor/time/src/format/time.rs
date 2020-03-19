@@ -5,13 +5,12 @@
 use crate::{
     format::{
         parse::{
-            try_consume_exact_digits_in_range, try_consume_first_match,
+            try_consume_exact_digits, try_consume_exact_digits_in_range, try_consume_first_match,
             AmPm::{AM, PM},
         },
-        Padding, ParseError, ParseResult, ParsedItems,
+        Padding, ParsedItems,
     },
-    shim::*,
-    Time,
+    internal_prelude::*,
 };
 use core::{
     fmt::{self, Formatter},
@@ -41,7 +40,7 @@ pub(crate) fn fmt_I(f: &mut Formatter<'_>, time: Time, padding: Padding) -> fmt:
         f,
         padding(Zero),
         2,
-        (time.hour() as i8 - 1).rem_euclid_shim(12) + 1
+        (time.hour() as i8 - 1).rem_euclid(12) + 1
     )
 }
 
@@ -68,6 +67,20 @@ pub(crate) fn parse_M(items: &mut ParsedItems, s: &mut &str, padding: Padding) -
         try_consume_exact_digits_in_range(s, 2, 0..60, padding.default_to(Padding::Zero))
             .ok_or(ParseError::InvalidMinute)?
             .into();
+    Ok(())
+}
+
+/// Subsecond nanoseconds. Always 9 digits
+pub(crate) fn fmt_N(f: &mut Formatter<'_>, time: Time) -> fmt::Result {
+    write!(f, "{:09}", time.nanosecond)
+}
+
+/// Subsecond nanoseconds. Always 9 digits
+#[inline(always)]
+pub(crate) fn parse_N(items: &mut ParsedItems, s: &mut &str) -> ParseResult<()> {
+    items.nanosecond = try_consume_exact_digits::<u32>(s, 9, Padding::None)
+        .ok_or(ParseError::InvalidNanosecond)?
+        .into();
     Ok(())
 }
 
@@ -120,7 +133,7 @@ pub(crate) fn fmt_S(f: &mut Formatter<'_>, time: Time, padding: Padding) -> fmt:
 pub(crate) fn parse_S(items: &mut ParsedItems, s: &mut &str, padding: Padding) -> ParseResult<()> {
     items.second =
         try_consume_exact_digits_in_range(s, 2, 0..60, padding.default_to(Padding::Zero))
-            .ok_or(ParseError::InvalidMinute)?
+            .ok_or(ParseError::InvalidSecond)?
             .into();
     Ok(())
 }

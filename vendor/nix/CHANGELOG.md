@@ -3,10 +3,159 @@
 All notable changes to this project will be documented in this file.
 This project adheres to [Semantic Versioning](http://semver.org/).
 
-## [Unreleased]
+## [Unreleased] - ReleaseDate
 ### Added
 ### Changed
 ### Fixed
+### Removed
+
+## [0.17.0] - 3 February 2020
+### Added
+- Add `CLK_TCK` to `SysconfVar`
+  (#[1177](https://github.com/nix-rust/nix/pull/1177))
+### Changed
+### Fixed
+### Removed
+- Removed deprecated Error::description from error types
+  (#[1175](https://github.com/nix-rust/nix/pull/1175))
+
+## [0.16.1] - 23 December 2019
+### Added
+### Changed
+### Fixed
+
+- Fixed the build for OpenBSD
+  (#[1168](https://github.com/nix-rust/nix/pull/1168))
+
+### Removed
+
+## [0.16.0] - 1 December 2019
+### Added
+- Added `ptrace::seize()`: similar to `attach()` on Linux
+  but with better-defined semantics.
+  (#[1154](https://github.com/nix-rust/nix/pull/1154))
+
+- Added `Signal::as_str()`: returns signal name as `&'static str`
+  (#[1138](https://github.com/nix-rust/nix/pull/1138))
+
+- Added `posix_fallocate`.
+  ([#1105](https://github.com/nix-rust/nix/pull/1105))
+
+- Implemented `Default` for `FdSet`
+  ([#1107](https://github.com/nix-rust/nix/pull/1107))
+
+- Added `NixPath::is_empty`.
+  ([#1107](https://github.com/nix-rust/nix/pull/1107))
+
+- Added `mkfifoat`
+  ([#1133](https://github.com/nix-rust/nix/pull/1133))
+
+- Added `User::from_uid`, `User::from_name`, `User::from_gid` and
+  `Group::from_name`,
+  ([#1139](https://github.com/nix-rust/nix/pull/1139))
+
+- Added `linkat`
+  ([#1101](https://github.com/nix-rust/nix/pull/1101))
+
+- Added `sched_getaffinity`.
+  ([#1148](https://github.com/nix-rust/nix/pull/1148))
+
+- Added optional `Signal` argument to `ptrace::{detach, syscall}` for signal
+  injection. ([#1083](https://github.com/nix-rust/nix/pull/1083))
+
+### Changed
+- `sys::termios::BaudRate` now implements `TryFrom<speed_t>` instead of
+  `From<speed_t>`.  The old `From` implementation would panic on failure.
+  ([#1159](https://github.com/nix-rust/nix/pull/1159))
+
+- `sys::socket::ControlMessage::ScmCredentials` and
+  `sys::socket::ControlMessageOwned::ScmCredentials` now wrap `UnixCredentials`
+  rather than `libc::ucred`.
+  ([#1160](https://github.com/nix-rust/nix/pull/1160))
+
+- `sys::socket::recvmsg` now takes a plain `Vec` instead of a `CmsgBuffer`
+  implementor.  If you were already using `cmsg_space!`, then you needn't worry.
+  ([#1156](https://github.com/nix-rust/nix/pull/1156))
+
+- `sys::socket::recvfrom` now returns
+  `Result<(usize, Option<SockAddr>)>` instead of `Result<(usize, SockAddr)>`.
+  ([#1145](https://github.com/nix-rust/nix/pull/1145))
+
+- `Signal::from_c_int` has been replaced by `Signal::try_from`
+  ([#1113](https://github.com/nix-rust/nix/pull/1113))
+
+- Changed `readlink` and `readlinkat` to return `OsString`
+  ([#1109](https://github.com/nix-rust/nix/pull/1109))
+
+  ```rust
+  # use nix::fcntl::{readlink, readlinkat};
+  // the buffer argument of `readlink` and `readlinkat` has been removed,
+  // and the return value is now an owned type (`OsString`).
+  // Existing code can be updated by removing the buffer argument
+  // and removing any clone or similar operation on the output
+
+  // old code `readlink(&path, &mut buf)` can be replaced with the following
+  let _: OsString = readlink(&path);
+  
+  // old code `readlinkat(dirfd, &path, &mut buf)` can be replaced with the following
+  let _: OsString = readlinkat(dirfd, &path);
+  ```
+
+- Minimum supported Rust version is now 1.36.0.
+  ([#1108](https://github.com/nix-rust/nix/pull/1108))
+
+- `Ipv4Addr::octets`, `Ipv4Addr::to_std`, `Error::as_errno`,
+  `ForkResult::is_child`, `ForkResult::is_parent`, `Gid::as_raw`,
+  `Uid::is_root`, `Uid::as_raw`, `Pid::as_raw`, and `PollFd::revents` now take
+  `self` by value.
+  ([#1107](https://github.com/nix-rust/nix/pull/1107))
+
+- Type `&CString` for parameters of `exec(v|ve|vp|vpe|veat)` are changed to `&CStr`.
+  ([#1121](https://github.com/nix-rust/nix/pull/1121))
+
+### Fixed
+- Fix length of abstract socket addresses
+  ([#1120](https://github.com/nix-rust/nix/pull/1120))
+
+- Fix initialization of msghdr in recvmsg/sendmsg when built with musl
+  ([#1136](https://github.com/nix-rust/nix/pull/1136))
+
+### Removed
+- Remove the deprecated `CmsgSpace`.
+  ([#1156](https://github.com/nix-rust/nix/pull/1156))
+
+## [0.15.0] - 10 August 2019
+### Added
+- Added `MSG_WAITALL` to `MsgFlags` in `sys::socket`.
+  ([#1079](https://github.com/nix-rust/nix/pull/1079))
+- Implemented `Clone`, `Copy`, `Debug`, `Eq`, `Hash`, and `PartialEq` for most
+  types that support them. ([#1035](https://github.com/nix-rust/nix/pull/1035))
+- Added `copy_file_range` wrapper
+  ([#1069](https://github.com/nix-rust/nix/pull/1069))
+- Add `mkdirat`.
+  ([#1084](https://github.com/nix-rust/nix/pull/1084))
+- Add `posix_fadvise`.
+  ([#1089](https://github.com/nix-rust/nix/pull/1089))
+- Added `AF_VSOCK` to `AddressFamily`.
+  ([#1091](https://github.com/nix-rust/nix/pull/1091))
+- Add `unlinkat`
+  ([#1058](https://github.com/nix-rust/nix/pull/1058))
+- Add `renameat`.
+  ([#1097](https://github.com/nix-rust/nix/pull/1097))
+
+### Changed
+- Support for `ifaddrs` now present when building for Android.
+  ([#1077](https://github.com/nix-rust/nix/pull/1077))
+- Minimum supported Rust version is now 1.31.0
+  ([#1035](https://github.com/nix-rust/nix/pull/1035))
+  ([#1095](https://github.com/nix-rust/nix/pull/1095))
+- Now functions `statfs()` and `fstatfs()` return result with `Statfs` wrapper
+  ([#928](https://github.com/nix-rust/nix/pull/928))
+
+### Fixed
+- Enabled `sched_yield` for all nix hosts.
+  ([#1090](https://github.com/nix-rust/nix/pull/1090))
+
 ### Removed
 
 ## [0.14.1] - 2019-06-06

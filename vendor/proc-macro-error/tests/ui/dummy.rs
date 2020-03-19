@@ -11,6 +11,3 @@ dummy!(need_default);
 fn main() {
     let _ = NeedDefault::default();
 }
-
-
-

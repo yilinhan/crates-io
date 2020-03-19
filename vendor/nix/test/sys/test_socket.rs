@@ -1,9 +1,12 @@
-use nix::sys::socket::{InetAddr, UnixAddr, getsockname};
-use std::slice;
+use nix::ifaddrs::InterfaceAddress;
+use nix::sys::socket::{AddressFamily, InetAddr, UnixAddr, getsockname};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::net::{self, Ipv6Addr, SocketAddr, SocketAddrV6};
-use std::path::Path;
-use std::str::FromStr;
 use std::os::unix::io::RawFd;
+use std::path::Path;
+use std::slice;
+use std::str::FromStr;
 use libc::c_char;
 use tempfile;
 
@@ -66,26 +69,67 @@ pub fn test_path_to_sock_addr() {
     assert_eq!(addr.path(), Some(actual));
 }
 
+fn calculate_hash<T: Hash>(t: &T) -> u64 {
+    let mut s = DefaultHasher::new();
+    t.hash(&mut s);
+    s.finish()
+}
+
+#[test]
+pub fn test_addr_equality_path() {
+    let path = "/foo/bar";
+    let actual = Path::new(path);
+    let addr1 = UnixAddr::new(actual).unwrap();
+    let mut addr2 = addr1.clone();
+
+    addr2.0.sun_path[10] = 127;
+
+    assert_eq!(addr1, addr2);
+    assert_eq!(calculate_hash(&addr1), calculate_hash(&addr2));
+}
+
+#[cfg(any(target_os = "android", target_os = "linux"))]
+#[test]
+pub fn test_abstract_sun_path_too_long() {
+    let name = String::from("nix\0abstract\0tesnix\0abstract\0tesnix\0abstract\0tesnix\0abstract\0tesnix\0abstract\0testttttnix\0abstract\0test\0make\0sure\0this\0is\0long\0enough");
+    let addr = UnixAddr::new_abstract(name.as_bytes());
+    assert!(addr.is_err());
+}
+
+#[cfg(any(target_os = "android", target_os = "linux"))]
+#[test]
+pub fn test_addr_equality_abstract() {
+    let name = String::from("nix\0abstract\0test");
+    let addr1 = UnixAddr::new_abstract(name.as_bytes()).unwrap();
+    let mut addr2 = addr1.clone();
+
+    assert_eq!(addr1, addr2);
+    assert_eq!(calculate_hash(&addr1), calculate_hash(&addr2));
+
+    addr2.0.sun_path[17] = 127;
+    assert_ne!(addr1, addr2);
+    assert_ne!(calculate_hash(&addr1), calculate_hash(&addr2));
+}
+
 // Test getting/setting abstract addresses (without unix socket creation)
 #[cfg(target_os = "linux")]
 #[test]
 pub fn test_abstract_uds_addr() {
     let empty = String::new();
     let addr = UnixAddr::new_abstract(empty.as_bytes()).unwrap();
-    assert_eq!(addr.as_abstract(), Some(empty.as_bytes()));
+    let sun_path: [u8; 0] = [];
+    assert_eq!(addr.as_abstract(), Some(&sun_path[..]));
 
     let name = String::from("nix\0abstract\0test");
     let addr = UnixAddr::new_abstract(name.as_bytes()).unwrap();
-    assert_eq!(addr.as_abstract(), Some(name.as_bytes()));
+    let sun_path = [
+        110u8, 105, 120, 0, 97, 98, 115, 116, 114, 97, 99, 116, 0, 116, 101, 115, 116
+    ];
+    assert_eq!(addr.as_abstract(), Some(&sun_path[..]));
     assert_eq!(addr.path(), None);
 
     // Internally, name is null-prefixed (abstract namespace)
-    let internal: &[u8] = unsafe {
-        slice::from_raw_parts(addr.0.sun_path.as_ptr() as *const u8, addr.1)
-    };
-    let mut abstract_name = name.clone();
-    abstract_name.insert(0, '\0');
-    assert_eq!(internal, abstract_name.as_bytes());
+    assert_eq!(addr.0.sun_path[0], 0);
 }
 
 #[test]
@@ -115,6 +159,73 @@ pub fn test_socketpair() {
     read(fd2, &mut buf).unwrap();
 
     assert_eq!(&buf[..], b"hello");
+}
+
+mod recvfrom {
+    use nix::Result;
+    use nix::sys::socket::*;
+    use std::thread;
+    use super::*;
+
+    const MSG: &'static [u8] = b"Hello, World!";
+
+    fn sendrecv<F>(rsock: RawFd, ssock: RawFd, f: F) -> Option<SockAddr>
+        where F: Fn(RawFd, &[u8], MsgFlags) -> Result<usize> + Send + 'static
+    {
+        let mut buf: [u8; 13] = [0u8; 13];
+        let mut l = 0;
+        let mut from = None;
+
+        let send_thread = thread::spawn(move || {
+            let mut l = 0;
+            while l < std::mem::size_of_val(MSG) {
+                l += f(ssock, &MSG[l..], MsgFlags::empty()).unwrap();
+            }
+        });
+
+        while l < std::mem::size_of_val(MSG) {
+            let (len, from_) = recvfrom(rsock, &mut buf[l..]).unwrap();
+            from = from_;
+            l += len;
+        }
+        assert_eq!(&buf, MSG);
+        send_thread.join().unwrap();
+        from
+    }
+
+    #[test]
+    pub fn stream() {
+        let (fd2, fd1) = socketpair(AddressFamily::Unix, SockType::Stream,
+                                    None, SockFlag::empty()).unwrap();
+        // Ignore from for stream sockets
+        let _ = sendrecv(fd1, fd2, |s, m, flags| {
+            send(s, m, flags)
+        });
+    }
+
+    #[test]
+    pub fn udp() {
+        let std_sa = SocketAddr::from_str("127.0.0.1:6789").unwrap();
+        let inet_addr = InetAddr::from_std(&std_sa);
+        let sock_addr = SockAddr::new_inet(inet_addr);
+        let rsock = socket(AddressFamily::Inet,
+            SockType::Datagram,
+            SockFlag::empty(),
+            None
+        ).unwrap();
+        bind(rsock, &sock_addr).unwrap();
+        let ssock = socket(
+            AddressFamily::Inet,
+            SockType::Datagram,
+            SockFlag::empty(),
+            None,
+        ).expect("send socket failed");
+        let from = sendrecv(rsock, ssock, move |s, m, flags| {
+            sendto(s, m, &sock_addr, flags)
+        });
+        // UDP sockets should set the from address
+        assert_eq!(AddressFamily::Inet, from.unwrap().family());
+    }
 }
 
 // Test error handling of our recvmsg wrapper
@@ -200,6 +311,10 @@ pub fn test_af_alg_cipher() {
                            ControlMessage, MsgFlags};
     use nix::sys::socket::sockopt::AlgSetKey;
 
+    // Travis's seccomp profile blocks AF_ALG
+    // https://docs.docker.com/engine/security/seccomp/
+    skip_if_seccomp!(test_af_alg_cipher);
+
     let alg_type = "skcipher";
     let alg_name = "ctr(aes)";
     // 256-bits secret key
@@ -256,13 +371,17 @@ pub fn test_af_alg_cipher() {
 #[cfg(any(target_os = "linux", target_os= "android"))]
 #[test]
 pub fn test_af_alg_aead() {
-    use libc;
+    use libc::{ALG_OP_DECRYPT, ALG_OP_ENCRYPT};
     use nix::sys::uio::IoVec;
     use nix::unistd::{read, close};
     use nix::sys::socket::{socket, sendmsg, bind, accept, setsockopt,
                            AddressFamily, SockType, SockFlag, SockAddr,
                            ControlMessage, MsgFlags};
     use nix::sys::socket::sockopt::{AlgSetKey, AlgSetAeadAuthSize};
+
+    // Travis's seccomp profile blocks AF_ALG
+    // https://docs.docker.com/engine/security/seccomp/
+    skip_if_seccomp!(test_af_alg_aead);
 
     let auth_size = 4usize;
     let assoc_size = 16u32;
@@ -299,7 +418,7 @@ pub fn test_af_alg_aead() {
     let session_socket = accept(sock).expect("accept failed");
 
     let msgs = [
-        ControlMessage::AlgSetOp(&libc::ALG_OP_ENCRYPT),
+        ControlMessage::AlgSetOp(&ALG_OP_ENCRYPT),
         ControlMessage::AlgSetIv(iv.as_slice()),
         ControlMessage::AlgSetAeadAssoclen(&assoc_size)];
     let iov = IoVec::from_slice(&payload);
@@ -322,7 +441,7 @@ pub fn test_af_alg_aead() {
     let session_socket = accept(sock).expect("accept failed");
 
     let msgs = [
-        ControlMessage::AlgSetOp(&libc::ALG_OP_DECRYPT),
+        ControlMessage::AlgSetOp(&ALG_OP_DECRYPT),
         ControlMessage::AlgSetIv(iv.as_slice()),
         ControlMessage::AlgSetAeadAssoclen(&assoc_size),
     ];
@@ -442,7 +561,7 @@ fn test_scm_credentials() {
             pid: getpid().as_raw(),
             uid: getuid().as_raw(),
             gid: getgid().as_raw(),
-        };
+        }.into();
         let cmsg = ControlMessage::ScmCredentials(&cred);
         assert_eq!(sendmsg(send, &iov, &[cmsg], MsgFlags::empty(), None).unwrap(), 5);
         close(send).unwrap();
@@ -458,9 +577,9 @@ fn test_scm_credentials() {
         for cmsg in msg.cmsgs() {
             if let ControlMessageOwned::ScmCredentials(cred) = cmsg {
                 assert!(received_cred.is_none());
-                assert_eq!(cred.pid, getpid().as_raw());
-                assert_eq!(cred.uid, getuid().as_raw());
-                assert_eq!(cred.gid, getgid().as_raw());
+                assert_eq!(cred.pid(), getpid().as_raw());
+                assert_eq!(cred.uid(), getuid().as_raw());
+                assert_eq!(cred.gid(), getgid().as_raw());
                 received_cred = Some(cred);
             } else {
                 panic!("unexpected cmsg");
@@ -501,11 +620,11 @@ fn test_too_large_cmsgspace() {
 
 #[cfg(any(target_os = "android", target_os = "linux"))]
 fn test_impl_scm_credentials_and_rights(mut space: Vec<u8>) {
-    use libc;
+    use libc::ucred;
     use nix::sys::uio::IoVec;
     use nix::unistd::{pipe, read, write, close, getpid, getuid, getgid};
     use nix::sys::socket::{socketpair, sendmsg, recvmsg, setsockopt,
-                           AddressFamily, SockType, SockFlag,
+                           SockType, SockFlag,
                            ControlMessage, ControlMessageOwned, MsgFlags};
     use nix::sys::socket::sockopt::PassCred;
 
@@ -518,11 +637,11 @@ fn test_impl_scm_credentials_and_rights(mut space: Vec<u8>) {
 
     {
         let iov = [IoVec::from_slice(b"hello")];
-        let cred = libc::ucred {
+        let cred = ucred {
             pid: getpid().as_raw(),
             uid: getuid().as_raw(),
             gid: getgid().as_raw(),
-        };
+        }.into();
         let fds = [r];
         let cmsgs = [
             ControlMessage::ScmCredentials(&cred),
@@ -550,9 +669,9 @@ fn test_impl_scm_credentials_and_rights(mut space: Vec<u8>) {
                 }
                 ControlMessageOwned::ScmCredentials(cred) => {
                     assert!(received_cred.is_none());
-                    assert_eq!(cred.pid, getpid().as_raw());
-                    assert_eq!(cred.uid, getuid().as_raw());
-                    assert_eq!(cred.gid, getgid().as_raw());
+                    assert_eq!(cred.pid(), getpid().as_raw());
+                    assert_eq!(cred.uid(), getuid().as_raw());
+                    assert_eq!(cred.gid(), getgid().as_raw());
                     received_cred = Some(cred);
                 }
                 _ => panic!("unexpected cmsg"),
@@ -577,7 +696,7 @@ fn test_impl_scm_credentials_and_rights(mut space: Vec<u8>) {
 // Test creating and using named unix domain sockets
 #[test]
 pub fn test_unixdomain() {
-    use nix::sys::socket::{AddressFamily, SockType, SockFlag};
+    use nix::sys::socket::{SockType, SockFlag};
     use nix::sys::socket::{bind, socket, connect, listen, accept, SockAddr};
     use nix::unistd::{read, write, close};
     use std::thread;
@@ -615,7 +734,7 @@ pub fn test_unixdomain() {
 pub fn test_syscontrol() {
     use nix::Error;
     use nix::errno::Errno;
-    use nix::sys::socket::{AddressFamily, socket, SockAddr, SockType, SockFlag, SockProtocol};
+    use nix::sys::socket::{socket, SockAddr, SockType, SockFlag, SockProtocol};
 
     let fd = socket(AddressFamily::System, SockType::Datagram,
                     SockFlag::empty(), SockProtocol::KextControl)
@@ -627,8 +746,6 @@ pub fn test_syscontrol() {
     // connect(fd, &sockaddr).expect("connect failed");
 }
 
-use nix::ifaddrs::InterfaceAddress;
-use nix::sys::socket::AddressFamily;
 #[cfg(any(
     target_os = "android",
     target_os = "freebsd",
@@ -896,7 +1013,7 @@ pub fn test_recv_ipv6pktinfo() {
     use libc;
     use nix::net::if_::*;
     use nix::sys::socket::sockopt::Ipv6RecvPacketInfo;
-    use nix::sys::socket::{bind, AddressFamily, SockFlag, SockType};
+    use nix::sys::socket::{bind, SockFlag, SockType};
     use nix::sys::socket::{getsockname, setsockopt, socket};
     use nix::sys::socket::{recvmsg, sendmsg, ControlMessageOwned, MsgFlags};
     use nix::sys::uio::IoVec;
@@ -966,4 +1083,56 @@ pub fn test_recv_ipv6pktinfo() {
             [1u8, 2, 3, 4, 5, 6, 7, 8]
         );
     }
+}
+
+#[cfg(target_os = "linux")]
+#[test]
+pub fn test_vsock() {
+    use libc;
+    use nix::Error;
+    use nix::errno::Errno;
+    use nix::sys::socket::{AddressFamily, socket, bind, connect, listen,
+                           SockAddr, SockType, SockFlag};
+    use nix::unistd::{close};
+    use std::thread;
+
+    let port: u32 = 3000;
+
+    let s1 = socket(AddressFamily::Vsock,  SockType::Stream,
+                    SockFlag::empty(), None)
+             .expect("socket failed");
+
+    // VMADDR_CID_HYPERVISOR and VMADDR_CID_RESERVED are reserved, so we expect
+    // an EADDRNOTAVAIL error.
+    let sockaddr = SockAddr::new_vsock(libc::VMADDR_CID_HYPERVISOR, port);
+    assert_eq!(bind(s1, &sockaddr).err(),
+               Some(Error::Sys(Errno::EADDRNOTAVAIL)));
+
+    let sockaddr = SockAddr::new_vsock(libc::VMADDR_CID_RESERVED, port);
+    assert_eq!(bind(s1, &sockaddr).err(),
+               Some(Error::Sys(Errno::EADDRNOTAVAIL)));
+
+
+    let sockaddr = SockAddr::new_vsock(libc::VMADDR_CID_ANY, port);
+    assert_eq!(bind(s1, &sockaddr), Ok(()));
+    listen(s1, 10).expect("listen failed");
+
+    let thr = thread::spawn(move || {
+        let cid: u32 = libc::VMADDR_CID_HOST;
+
+        let s2 = socket(AddressFamily::Vsock, SockType::Stream,
+                        SockFlag::empty(), None)
+                 .expect("socket failed");
+
+        let sockaddr = SockAddr::new_vsock(cid, port);
+
+        // The current implementation does not support loopback devices, so,
+        // for now, we expect a failure on the connect.
+        assert_ne!(connect(s2, &sockaddr), Ok(()));
+
+        close(s2).unwrap();
+    });
+
+    close(s1).unwrap();
+    thr.join().unwrap();
 }

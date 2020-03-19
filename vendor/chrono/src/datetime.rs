@@ -21,7 +21,7 @@ use offset::Local;
 use offset::{TimeZone, Offset, Utc, FixedOffset};
 use naive::{NaiveTime, NaiveDateTime, IsoWeek};
 use Date;
-use format::{Item, Numeric, Pad, Fixed};
+use format::{Item, Fixed};
 use format::{parse, Parsed, ParseError, ParseResult, StrftimeItems};
 #[cfg(any(feature = "alloc", feature = "std", test))]
 use format::DelayedFormat;
@@ -82,7 +82,7 @@ impl<Tz: TimeZone> DateTime<Tz> {
     /// assert_eq!(Utc.timestamp(61, 0), dt);
     /// ~~~~
     //
-    // note: this constructor is purposedly not named to `new` to discourage the direct usage.
+    // note: this constructor is purposely not named to `new` to discourage the direct usage.
     #[inline]
     pub fn from_utc(datetime: NaiveDateTime, offset: Tz::Offset) -> DateTime<Tz> {
         DateTime { datetime: datetime, offset: offset }
@@ -137,7 +137,7 @@ impl<Tz: TimeZone> DateTime<Tz> {
     /// Note that this does reduce the number of years that can be represented
     /// from ~584 Billion to ~584. (If this is a problem, please file
     /// an issue to let me know what domain needs nanosecond precision over
-    /// millenia, I'm curious.)
+    /// millennia, I'm curious.)
     ///
     /// # Example
     ///
@@ -324,6 +324,17 @@ fn map_local<Tz: TimeZone, F>(dt: &DateTime<Tz>, mut f: F) -> Option<DateTime<Tz
 impl DateTime<FixedOffset> {
     /// Parses an RFC 2822 date and time string such as `Tue, 1 Jul 2003 10:52:37 +0200`,
     /// then returns a new `DateTime` with a parsed `FixedOffset`.
+    ///
+    /// RFC 2822 is the internet message standard that specifices the
+    /// representation of times in HTTP and email headers.
+    ///
+    /// ```
+    /// # use chrono::{DateTime, FixedOffset, TimeZone};
+    /// assert_eq!(
+    ///     DateTime::parse_from_rfc2822("Wed, 18 Feb 2015 23:16:09 GMT").unwrap(),
+    ///     FixedOffset::east(0).ymd(2015, 2, 18).and_hms(23, 16, 9)
+    /// );
+    /// ```
     pub fn parse_from_rfc2822(s: &str) -> ParseResult<DateTime<FixedOffset>> {
         const ITEMS: &'static [Item<'static>] = &[Item::Fixed(Fixed::RFC2822)];
         let mut parsed = Parsed::new();
@@ -564,8 +575,23 @@ impl<Tz: TimeZone, Tz2: TimeZone> PartialEq<DateTime<Tz2>> for DateTime<Tz> {
 impl<Tz: TimeZone> Eq for DateTime<Tz> {
 }
 
-impl<Tz: TimeZone> PartialOrd for DateTime<Tz> {
-    fn partial_cmp(&self, other: &DateTime<Tz>) -> Option<Ordering> {
+impl<Tz: TimeZone, Tz2: TimeZone> PartialOrd<DateTime<Tz2>> for DateTime<Tz> {
+    /// Compare two DateTimes based on their true time, ignoring time zones
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// use chrono::prelude::*;
+    ///
+    /// let earlier = Utc.ymd(2015, 5, 15).and_hms(2, 0, 0).with_timezone(&FixedOffset::west(1 * 3600));
+    /// let later   = Utc.ymd(2015, 5, 15).and_hms(3, 0, 0).with_timezone(&FixedOffset::west(5 * 3600));
+    ///
+    /// assert_eq!(earlier.to_string(), "2015-05-15 01:00:00 -01:00");
+    /// assert_eq!(later.to_string(), "2015-05-14 22:00:00 -05:00");
+    ///
+    /// assert!(later > earlier);
+    /// ```
+    fn partial_cmp(&self, other: &DateTime<Tz2>) -> Option<Ordering> {
         self.datetime.partial_cmp(&other.datetime)
     }
 }
@@ -614,33 +640,6 @@ impl<Tz: TimeZone> fmt::Debug for DateTime<Tz> {
 impl<Tz: TimeZone> fmt::Display for DateTime<Tz> where Tz::Offset: fmt::Display {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} {}", self.naive_local(), self.offset)
-    }
-}
-
-impl str::FromStr for DateTime<FixedOffset> {
-    type Err = ParseError;
-
-    fn from_str(s: &str) -> ParseResult<DateTime<FixedOffset>> {
-        const ITEMS: &'static [Item<'static>] = &[
-                             Item::Numeric(Numeric::Year, Pad::Zero),
-            Item::Space(""), Item::Literal("-"),
-                             Item::Numeric(Numeric::Month, Pad::Zero),
-            Item::Space(""), Item::Literal("-"),
-                             Item::Numeric(Numeric::Day, Pad::Zero),
-            Item::Space(""), Item::Literal("T"), // XXX shouldn't this be case-insensitive?
-                             Item::Numeric(Numeric::Hour, Pad::Zero),
-            Item::Space(""), Item::Literal(":"),
-                             Item::Numeric(Numeric::Minute, Pad::Zero),
-            Item::Space(""), Item::Literal(":"),
-                             Item::Numeric(Numeric::Second, Pad::Zero),
-                             Item::Fixed(Fixed::Nanosecond),
-            Item::Space(""), Item::Fixed(Fixed::TimezoneOffsetZ),
-            Item::Space(""),
-        ];
-
-        let mut parsed = Parsed::new();
-        parse(&mut parsed, s, ITEMS.iter())?;
-        parsed.to_datetime()
     }
 }
 
@@ -2021,6 +2020,9 @@ mod tests {
         assert_eq!(d.date(), tz.ymd(2017, 8, 9));
         assert_eq!(d.date().naive_local(), NaiveDate::from_ymd(2017, 8, 9));
         assert_eq!(d.date().and_time(d.time()), Some(d));
+
+        let utc_d = Utc.ymd(2017, 8, 9).and_hms(12, 34, 56);
+        assert!(utc_d < d);
     }
 
     #[test]
@@ -2050,6 +2052,8 @@ mod tests {
                    "2015-02-18T23:59:60.234567+05:00");
 
         assert_eq!(DateTime::parse_from_rfc2822("Wed, 18 Feb 2015 23:16:09 +0000"),
+                   Ok(FixedOffset::east(0).ymd(2015, 2, 18).and_hms(23, 16, 9)));
+        assert_eq!(DateTime::parse_from_rfc2822("Wed, 18 Feb 2015 23:16:09 -0000"),
                    Ok(FixedOffset::east(0).ymd(2015, 2, 18).and_hms(23, 16, 9)));
         assert_eq!(DateTime::parse_from_rfc3339("2015-02-18T23:16:09Z"),
                    Ok(FixedOffset::east(0).ymd(2015, 2, 18).and_hms(23, 16, 9)));
@@ -2091,6 +2095,15 @@ mod tests {
 
     #[test]
     fn test_datetime_from_str() {
+        assert_eq!("2015-02-18T23:16:9.15Z".parse::<DateTime<FixedOffset>>(),
+                   Ok(FixedOffset::east(0).ymd(2015, 2, 18).and_hms_milli(23, 16, 9, 150)));
+        assert_eq!("2015-02-18T23:16:9.15Z".parse::<DateTime<Utc>>(),
+                   Ok(Utc.ymd(2015, 2, 18).and_hms_milli(23, 16, 9, 150)));
+        assert_eq!("2015-02-18T23:16:9.15 UTC".parse::<DateTime<Utc>>(),
+                   Ok(Utc.ymd(2015, 2, 18).and_hms_milli(23, 16, 9, 150)));
+        assert_eq!("2015-02-18T23:16:9.15UTC".parse::<DateTime<Utc>>(),
+                   Ok(Utc.ymd(2015, 2, 18).and_hms_milli(23, 16, 9, 150)));
+
         assert_eq!("2015-2-18T23:16:9.15Z".parse::<DateTime<FixedOffset>>(),
                    Ok(FixedOffset::east(0).ymd(2015, 2, 18).and_hms_milli(23, 16, 9, 150)));
         assert_eq!("2015-2-18T13:16:9.15-10:00".parse::<DateTime<FixedOffset>>(),
@@ -2117,6 +2130,25 @@ mod tests {
         assert_eq!(Utc.datetime_from_str("Fri, 09 Aug 2013 23:54:35 GMT",
                                          "%a, %d %b %Y %H:%M:%S GMT"),
                    Ok(Utc.ymd(2013, 8, 9).and_hms(23, 54, 35)));
+    }
+
+    #[test]
+    fn test_to_string_round_trip() {
+        let dt = Utc.ymd(2000, 1, 1).and_hms(0, 0, 0);
+        let _dt: DateTime<Utc> = dt.to_string().parse().unwrap();
+
+        let ndt_fixed = dt.with_timezone(&FixedOffset::east(3600));
+        let _dt: DateTime<FixedOffset> = ndt_fixed.to_string().parse().unwrap();
+
+        let ndt_fixed = dt.with_timezone(&FixedOffset::east(0));
+        let _dt: DateTime<FixedOffset> = ndt_fixed.to_string().parse().unwrap();
+    }
+
+    #[test]
+    #[cfg(feature="clock")]
+    fn test_to_string_round_trip_with_local() {
+        let ndt = Local::now();
+        let _dt: DateTime<FixedOffset> = ndt.to_string().parse().unwrap();
     }
 
     #[test]
@@ -2215,52 +2247,4 @@ mod tests {
         assert_eq!(format!(" {} ", ymd_formatted), format!("{:^17}", ymd));
     }
 
-    #[cfg(feature = "bench")]
-    #[bench]
-    fn bench_datetime_parse_from_rfc2822(bh: &mut test::Bencher) {
-        bh.iter(|| {
-            let str = test::black_box("Wed, 18 Feb 2015 23:16:09 +0000");
-            DateTime::parse_from_rfc2822(str).unwrap()
-        });
-    }
-
-    #[cfg(feature = "bench")]
-    #[bench]
-    fn bench_datetime_parse_from_rfc3339(bh: &mut test::Bencher) {
-        bh.iter(|| {
-            let str = test::black_box("2015-02-18T23:59:60.234567+05:00");
-            DateTime::parse_from_rfc3339(str).unwrap()
-        });
-    }
-
-    #[cfg(feature = "bench")]
-    #[bench]
-    fn bench_datetime_from_str(bh: &mut test::Bencher) {
-        use std::str::FromStr;
-
-        bh.iter(|| {
-            let str = test::black_box("2019-03-30T18:46:57.193Z");
-            DateTime::<Utc>::from_str(str).unwrap()
-        });
-    }
-
-    #[cfg(feature = "bench")]
-    #[bench]
-    fn bench_datetime_to_rfc2822(bh: &mut test::Bencher) {
-        let pst = FixedOffset::east(8 * 60 * 60);
-        let dt = pst.ymd(2018, 1, 11).and_hms_nano(10, 5, 13, 084_660_000);
-        bh.iter(|| {
-            test::black_box(dt).to_rfc2822()
-        });
-    }
-
-    #[cfg(feature = "bench")]
-    #[bench]
-    fn bench_datetime_to_rfc3339(bh: &mut test::Bencher) {
-        let pst = FixedOffset::east(8 * 60 * 60);
-        let dt = pst.ymd(2018, 1, 11).and_hms_nano(10, 5, 13, 084_660_000);
-        bh.iter(|| {
-            test::black_box(dt).to_rfc3339()
-        });
-    }
 }

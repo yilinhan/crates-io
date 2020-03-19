@@ -5,7 +5,7 @@ use {Error, Result};
 use errno::Errno;
 use libc::{self, c_void, c_int, iovec, socklen_t, size_t,
         CMSG_FIRSTHDR, CMSG_NXTHDR, CMSG_DATA, CMSG_LEN};
-use std::{fmt, mem, ptr, slice};
+use std::{mem, ptr, slice};
 use std::os::unix::io::RawFd;
 use sys::time::TimeVal;
 use sys::uio::IoVec;
@@ -33,6 +33,8 @@ pub use self::addr::{
 pub use ::sys::socket::addr::netlink::NetlinkAddr;
 #[cfg(any(target_os = "android", target_os = "linux"))]
 pub use sys::socket::addr::alg::AlgAddr;
+#[cfg(target_os = "linux")]
+pub use sys::socket::addr::vsock::VsockAddr;
 
 pub use libc::{
     cmsghdr,
@@ -132,6 +134,10 @@ libc_bitflags!{
         /// [`recv()`](fn.recv.html)
         /// or similar function shall still return this data.
         MSG_PEEK;
+        /// Receive operation blocks until the full amount of data can be
+        /// returned. The function may return smaller amount of data if a signal
+        /// is caught, an error or disconnect occurs.
+        MSG_WAITALL;
         /// Enables nonblocking operation; if the operation would block,
         /// `EAGAIN` or `EWOULDBLOCK` is returned.  This provides similar
         /// behavior to setting the `O_NONBLOCK` flag
@@ -184,8 +190,8 @@ cfg_if! {
         /// Unix credentials of the sending process.
         ///
         /// This struct is used with the `SO_PEERCRED` ancillary message for UNIX sockets.
-        #[repr(C)]
-        #[derive(Clone, Copy)]
+        #[repr(transparent)]
+        #[derive(Clone, Copy, Debug, Eq, PartialEq)]
         pub struct UnixCredentials(libc::ucred);
 
         impl UnixCredentials {
@@ -205,13 +211,6 @@ cfg_if! {
             }
         }
 
-        impl PartialEq for UnixCredentials {
-            fn eq(&self, other: &Self) -> bool {
-                self.0.pid == other.0.pid && self.0.uid == other.0.uid && self.0.gid == other.0.gid
-            }
-        }
-        impl Eq for UnixCredentials {}
-
         impl From<libc::ucred> for UnixCredentials {
             fn from(cred: libc::ucred) -> Self {
                 UnixCredentials(cred)
@@ -223,16 +222,6 @@ cfg_if! {
                 self.0
             }
         }
-
-        impl fmt::Debug for UnixCredentials {
-            fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-                f.debug_struct("UnixCredentials")
-                    .field("pid", &self.0.pid)
-                    .field("uid", &self.0.uid)
-                    .field("gid", &self.0.gid)
-                    .finish()
-            }
-        }
     }
 }
 
@@ -240,7 +229,7 @@ cfg_if! {
 ///
 /// This is a wrapper type around `ip_mreq`.
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct IpMembershipRequest(libc::ip_mreq);
 
 impl IpMembershipRequest {
@@ -255,32 +244,11 @@ impl IpMembershipRequest {
     }
 }
 
-impl PartialEq for IpMembershipRequest {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.imr_multiaddr.s_addr == other.0.imr_multiaddr.s_addr
-            && self.0.imr_interface.s_addr == other.0.imr_interface.s_addr
-    }
-}
-impl Eq for IpMembershipRequest {}
-
-impl fmt::Debug for IpMembershipRequest {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mref = &self.0.imr_multiaddr;
-        let maddr = mref.s_addr;
-        let iref = &self.0.imr_interface;
-        let ifaddr = iref.s_addr;
-        f.debug_struct("IpMembershipRequest")
-            .field("imr_multiaddr", &maddr)
-            .field("imr_interface", &ifaddr)
-            .finish()
-    }
-}
-
 /// Request for ipv6 multicast socket operations
 ///
 /// This is a wrapper type around `ipv6_mreq`.
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Ipv6MembershipRequest(libc::ipv6_mreq);
 
 impl Ipv6MembershipRequest {
@@ -291,38 +259,6 @@ impl Ipv6MembershipRequest {
             ipv6mr_interface: 0,
         })
     }
-}
-
-impl PartialEq for Ipv6MembershipRequest {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.ipv6mr_multiaddr.s6_addr == other.0.ipv6mr_multiaddr.s6_addr &&
-            self.0.ipv6mr_interface == other.0.ipv6mr_interface
-    }
-}
-impl Eq for Ipv6MembershipRequest {}
-
-impl fmt::Debug for Ipv6MembershipRequest {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("Ipv6MembershipRequest")
-            .field("ipv6mr_multiaddr", &self.0.ipv6mr_multiaddr.s6_addr)
-            .field("ipv6mr_interface", &self.0.ipv6mr_interface)
-            .finish()
-    }
-}
-
-cfg_if! {
-    // Darwin and DragonFly BSD always align struct cmsghdr to 32-bit only.
-    if #[cfg(any(target_os = "dragonfly", target_os = "ios", target_os = "macos"))] {
-        type align_of_cmsg_data = u32;
-    } else {
-        type align_of_cmsg_data = size_t;
-    }
-}
-
-/// A type that can be used to store ancillary data received by
-/// [`recvmsg`](fn.recvmsg.html)
-pub trait CmsgBuffer {
-    fn as_bytes_mut(&mut self) -> &mut [u8];
 }
 
 /// Create a buffer large enough for storing some control messages as returned
@@ -360,62 +296,12 @@ macro_rules! cmsg_space {
                     CMSG_SPACE(mem::size_of::<$x>() as c_uint)
                 } as usize;
             )*
-            let mut v = Vec::<u8>::with_capacity(space);
-            // safe because any bit pattern is a valid u8
-            unsafe {v.set_len(space)};
-            v
+            Vec::<u8>::with_capacity(space)
         }
     }
 }
 
-/// A structure used to make room in a cmsghdr passed to recvmsg. The
-/// size and alignment match that of a cmsghdr followed by a T, but the
-/// fields are not accessible, as the actual types will change on a call
-/// to recvmsg.
-///
-/// To make room for multiple messages, nest the type parameter with
-/// tuples:
-///
-/// ```
-/// use std::os::unix::io::RawFd;
-/// use nix::sys::socket::CmsgSpace;
-/// let cmsg: CmsgSpace<([RawFd; 3], CmsgSpace<[RawFd; 2]>)> = CmsgSpace::new();
-/// ```
-#[repr(C)]
-#[allow(missing_debug_implementations)]
-pub struct CmsgSpace<T> {
-    _hdr: cmsghdr,
-    _pad: [align_of_cmsg_data; 0],
-    _data: T,
-}
-
-impl<T> CmsgSpace<T> {
-    /// Create a CmsgSpace<T>. The structure is used only for space, so
-    /// the fields are uninitialized.
-    #[deprecated( since="0.14.0", note="Use the cmsg_space! macro instead")]
-    pub fn new() -> Self {
-        // Safe because the fields themselves aren't accessible.
-        unsafe { mem::uninitialized() }
-    }
-}
-
-impl<T> CmsgBuffer for CmsgSpace<T> {
-    fn as_bytes_mut(&mut self) -> &mut [u8] {
-        // Safe because nothing ever attempts to access CmsgSpace's fields
-        unsafe {
-            slice::from_raw_parts_mut(self as *mut CmsgSpace<T> as *mut u8,
-                                      mem::size_of::<Self>())
-        }
-    }
-}
-
-impl CmsgBuffer for Vec<u8> {
-    fn as_bytes_mut(&mut self) -> &mut [u8] {
-        &mut self[..]
-    }
-}
-
-#[allow(missing_debug_implementations)] // msghdr isn't Debug
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RecvMsg<'a> {
     pub bytes: usize,
     cmsghdr: Option<&'a cmsghdr>,
@@ -435,7 +321,7 @@ impl<'a> RecvMsg<'a> {
     }
 }
 
-#[allow(missing_debug_implementations)] // msghdr isn't Debug
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CmsgIterator<'a> {
     /// Control message buffer to decode from. Must adhere to cmsg alignment.
     cmsghdr: Option<&'a cmsghdr>,
@@ -474,7 +360,7 @@ impl<'a> Iterator for CmsgIterator<'a> {
 //  alignment issues.
 //
 //  See https://github.com/nix-rust/nix/issues/999
-#[allow(missing_debug_implementations)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ControlMessageOwned {
     /// Received version of
     /// [`ControlMessage::ScmRights`][#enum.ControlMessage.html#variant.ScmRights]
@@ -482,7 +368,7 @@ pub enum ControlMessageOwned {
     /// Received version of
     /// [`ControlMessage::ScmCredentials`][#enum.ControlMessage.html#variant.ScmCredentials]
     #[cfg(any(target_os = "android", target_os = "linux"))]
-    ScmCredentials(libc::ucred),
+    ScmCredentials(UnixCredentials),
     /// A message of type `SCM_TIMESTAMP`, containing the time the
     /// packet was received by the kernel.
     ///
@@ -589,9 +475,9 @@ impl ControlMessageOwned {
     /// specified in the header. Normally, the kernel ensures that this is the
     /// case. "Correct" in this case includes correct length, alignment and
     /// actual content.
-    ///
-    /// Returns `None` if the data may be unaligned.  In that case use
-    /// `ControlMessageOwned::decode_from`.
+    // Clippy complains about the pointer alignment of `p`, not understanding
+    // that it's being fed to a function that can handle that.
+    #[allow(clippy::cast_ptr_alignment)]
     unsafe fn decode_from(header: &cmsghdr) -> ControlMessageOwned
     {
         let p = CMSG_DATA(header);
@@ -602,16 +488,15 @@ impl ControlMessageOwned {
                 let n = len / mem::size_of::<RawFd>();
                 let mut fds = Vec::with_capacity(n);
                 for i in 0..n {
-                    let fdp = (p as *const RawFd).offset(i as isize);
+                    let fdp = (p as *const RawFd).add(i);
                     fds.push(ptr::read_unaligned(fdp));
                 }
-                let cmo = ControlMessageOwned::ScmRights(fds);
-                cmo
+                ControlMessageOwned::ScmRights(fds)
             },
             #[cfg(any(target_os = "android", target_os = "linux"))]
             (libc::SOL_SOCKET, libc::SCM_CREDENTIALS) => {
                 let cred: libc::ucred = ptr::read_unaligned(p as *const _);
-                ControlMessageOwned::ScmCredentials(cred)
+                ControlMessageOwned::ScmCredentials(cred.into())
             }
             (libc::SOL_SOCKET, libc::SCM_TIMESTAMP) => {
                 let tv: libc::timeval = ptr::read_unaligned(p as *const _);
@@ -675,7 +560,7 @@ impl ControlMessageOwned {
 /// exhaustively pattern-match it.
 ///
 /// [Further reading](http://man7.org/linux/man-pages/man3/cmsg.3.html)
-#[allow(missing_debug_implementations)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ControlMessage<'a> {
     /// A message of type `SCM_RIGHTS`, containing an array of file
     /// descriptors passed between processes.
@@ -699,10 +584,8 @@ pub enum ControlMessage<'a> {
     ///
     /// For further information, please refer to the
     /// [`unix(7)`](http://man7.org/linux/man-pages/man7/unix.7.html) man page.
-    // FIXME: When `#[repr(transparent)]` is stable, use it on `UnixCredentials`
-    // and put that in here instead of a raw ucred.
     #[cfg(any(target_os = "android", target_os = "linux"))]
-    ScmCredentials(&'a libc::ucred),
+    ScmCredentials(&'a UnixCredentials),
 
     /// Set IV for `AF_ALG` crypto API.
     ///
@@ -738,7 +621,7 @@ pub enum ControlMessage<'a> {
 
 // An opaque structure used to prevent cmsghdr from being a public type
 #[doc(hidden)]
-#[allow(missing_debug_implementations)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UnknownCmsg(cmsghdr, Vec<u8>);
 
 impl<'a> ControlMessage<'a> {
@@ -764,16 +647,16 @@ impl<'a> ControlMessage<'a> {
 
     /// Return a reference to the payload data as a byte pointer
     fn copy_to_cmsg_data(&self, cmsg_data: *mut u8) {
-        let data_ptr = match self {
-            &ControlMessage::ScmRights(fds) => {
+        let data_ptr = match *self {
+            ControlMessage::ScmRights(fds) => {
                 fds as *const _ as *const u8
             },
             #[cfg(any(target_os = "android", target_os = "linux"))]
-            &ControlMessage::ScmCredentials(creds) => {
-                creds as *const libc::ucred as *const u8
+            ControlMessage::ScmCredentials(creds) => {
+                &creds.0 as *const libc::ucred as *const u8
             }
             #[cfg(any(target_os = "android", target_os = "linux"))]
-            &ControlMessage::AlgSetIv(iv) => {
+            ControlMessage::AlgSetIv(iv) => {
                 unsafe {
                     let alg_iv = cmsg_data as *mut libc::af_alg_iv;
                     (*alg_iv).ivlen = iv.len() as u32;
@@ -786,11 +669,11 @@ impl<'a> ControlMessage<'a> {
                 return
             },
             #[cfg(any(target_os = "android", target_os = "linux"))]
-            &ControlMessage::AlgSetOp(op) => {
+            ControlMessage::AlgSetOp(op) => {
                 op as *const _ as *const u8
             },
             #[cfg(any(target_os = "android", target_os = "linux"))]
-            &ControlMessage::AlgSetAeadAssoclen(len) => {
+            ControlMessage::AlgSetAeadAssoclen(len) => {
                 len as *const _ as *const u8
             },
         };
@@ -805,24 +688,24 @@ impl<'a> ControlMessage<'a> {
 
     /// The size of the payload, excluding its cmsghdr
     fn len(&self) -> usize {
-        match self {
-            &ControlMessage::ScmRights(fds) => {
+        match *self {
+            ControlMessage::ScmRights(fds) => {
                 mem::size_of_val(fds)
             },
             #[cfg(any(target_os = "android", target_os = "linux"))]
-            &ControlMessage::ScmCredentials(creds) => {
+            ControlMessage::ScmCredentials(creds) => {
                 mem::size_of_val(creds)
             }
             #[cfg(any(target_os = "android", target_os = "linux"))]
-            &ControlMessage::AlgSetIv(iv) => {
+            ControlMessage::AlgSetIv(iv) => {
                 mem::size_of::<libc::af_alg_iv>() + iv.len()
             },
             #[cfg(any(target_os = "android", target_os = "linux"))]
-            &ControlMessage::AlgSetOp(op) => {
+            ControlMessage::AlgSetOp(op) => {
                 mem::size_of_val(op)
             },
             #[cfg(any(target_os = "android", target_os = "linux"))]
-            &ControlMessage::AlgSetAeadAssoclen(len) => {
+            ControlMessage::AlgSetAeadAssoclen(len) => {
                 mem::size_of_val(len)
             },
         }
@@ -830,33 +713,32 @@ impl<'a> ControlMessage<'a> {
 
     /// Returns the value to put into the `cmsg_level` field of the header.
     fn cmsg_level(&self) -> libc::c_int {
-        match self {
-            &ControlMessage::ScmRights(_) => libc::SOL_SOCKET,
+        match *self {
+            ControlMessage::ScmRights(_) => libc::SOL_SOCKET,
             #[cfg(any(target_os = "android", target_os = "linux"))]
-            &ControlMessage::ScmCredentials(_) => libc::SOL_SOCKET,
+            ControlMessage::ScmCredentials(_) => libc::SOL_SOCKET,
             #[cfg(any(target_os = "android", target_os = "linux"))]
-            &ControlMessage::AlgSetIv(_) | &ControlMessage::AlgSetOp(_) | &ControlMessage::AlgSetAeadAssoclen(_) => {
-                libc::SOL_ALG
-            },
+            ControlMessage::AlgSetIv(_) | ControlMessage::AlgSetOp(_) |
+                ControlMessage::AlgSetAeadAssoclen(_) => libc::SOL_ALG ,
         }
     }
 
     /// Returns the value to put into the `cmsg_type` field of the header.
     fn cmsg_type(&self) -> libc::c_int {
-        match self {
-            &ControlMessage::ScmRights(_) => libc::SCM_RIGHTS,
+        match *self {
+            ControlMessage::ScmRights(_) => libc::SCM_RIGHTS,
             #[cfg(any(target_os = "android", target_os = "linux"))]
-            &ControlMessage::ScmCredentials(_) => libc::SCM_CREDENTIALS,
+            ControlMessage::ScmCredentials(_) => libc::SCM_CREDENTIALS,
             #[cfg(any(target_os = "android", target_os = "linux"))]
-            &ControlMessage::AlgSetIv(_) => {
+            ControlMessage::AlgSetIv(_) => {
                 libc::ALG_SET_IV
             },
             #[cfg(any(target_os = "android", target_os = "linux"))]
-            &ControlMessage::AlgSetOp(_) => {
+            ControlMessage::AlgSetOp(_) => {
                 libc::ALG_SET_OP
             },
             #[cfg(any(target_os = "android", target_os = "linux"))]
-            &ControlMessage::AlgSetAeadAssoclen(_) => {
+            ControlMessage::AlgSetAeadAssoclen(_) => {
                 libc::ALG_SET_AEAD_ASSOCLEN
             },
         }
@@ -903,20 +785,21 @@ pub fn sendmsg(fd: RawFd, iov: &[IoVec<&[u8]>], cmsgs: &[ControlMessage],
         ptr::null_mut()
     };
 
-    let mhdr = {
+    let mhdr = unsafe {
         // Musl's msghdr has private fields, so this is the only way to
         // initialize it.
-        let mut mhdr: msghdr = unsafe{mem::uninitialized()};
-        mhdr.msg_name = name as *mut _;
-        mhdr.msg_namelen = namelen;
+        let mut mhdr = mem::MaybeUninit::<msghdr>::zeroed();
+        let p = mhdr.as_mut_ptr();
+        (*p).msg_name = name as *mut _;
+        (*p).msg_namelen = namelen;
         // transmute iov into a mutable pointer.  sendmsg doesn't really mutate
         // the buffer, but the standard says that it takes a mutable pointer
-        mhdr.msg_iov = iov.as_ptr() as *mut _;
-        mhdr.msg_iovlen = iov.len() as _;
-        mhdr.msg_control = cmsg_ptr;
-        mhdr.msg_controllen = capacity as _;
-        mhdr.msg_flags = 0;
-        mhdr
+        (*p).msg_iov = iov.as_ptr() as *mut _;
+        (*p).msg_iovlen = iov.len() as _;
+        (*p).msg_control = cmsg_ptr;
+        (*p).msg_controllen = capacity as _;
+        (*p).msg_flags = 0;
+        mhdr.assume_init()
     };
 
     // Encode each cmsg.  This must happen after initializing the header because
@@ -941,32 +824,39 @@ pub fn sendmsg(fd: RawFd, iov: &[IoVec<&[u8]>], cmsgs: &[ControlMessage],
 /// optionally receive ancillary data into the provided buffer.
 /// If no ancillary data is desired, use () as the type parameter.
 ///
+/// # Arguments
+///
+/// * `fd`:             Socket file descriptor
+/// * `iov`:            Scatter-gather list of buffers to receive the message
+/// * `cmsg_buffer`:    Space to receive ancillary data.  Should be created by
+///                     [`cmsg_space!`](macro.cmsg_space.html)
+/// * `flags`:          Optional flags passed directly to the operating system.
+///
 /// # References
 /// [recvmsg(2)](http://pubs.opengroup.org/onlinepubs/9699919799/functions/recvmsg.html)
 pub fn recvmsg<'a>(fd: RawFd, iov: &[IoVec<&mut [u8]>],
-                   cmsg_buffer: Option<&'a mut CmsgBuffer>,
+                   mut cmsg_buffer: Option<&'a mut Vec<u8>>,
                    flags: MsgFlags) -> Result<RecvMsg<'a>>
 {
-    let mut address: sockaddr_storage = unsafe { mem::uninitialized() };
-    let (msg_control, msg_controllen) = match cmsg_buffer {
-        Some(cmsgspace) => {
-            let msg_buf = cmsgspace.as_bytes_mut();
-            (msg_buf.as_mut_ptr(), msg_buf.len())
-        },
-        None => (ptr::null_mut(), 0),
-    };
+    let mut address = mem::MaybeUninit::uninit();
+    let (msg_control, msg_controllen) = cmsg_buffer.as_mut()
+        .map(|v| (v.as_mut_ptr(), v.capacity()))
+        .unwrap_or((ptr::null_mut(), 0));
     let mut mhdr = {
-        // Musl's msghdr has private fields, so this is the only way to
-        // initialize it.
-        let mut mhdr: msghdr = unsafe{mem::uninitialized()};
-        mhdr.msg_name = &mut address as *mut sockaddr_storage as *mut c_void;
-        mhdr.msg_namelen = mem::size_of::<sockaddr_storage>() as socklen_t;
-        mhdr.msg_iov = iov.as_ptr() as *mut iovec;
-        mhdr.msg_iovlen = iov.len() as _;
-        mhdr.msg_control = msg_control as *mut c_void;
-        mhdr.msg_controllen = msg_controllen as _;
-        mhdr.msg_flags = 0;
-        mhdr
+        unsafe {
+            // Musl's msghdr has private fields, so this is the only way to
+            // initialize it.
+            let mut mhdr = mem::MaybeUninit::<msghdr>::zeroed();
+            let p = mhdr.as_mut_ptr();
+            (*p).msg_name = address.as_mut_ptr() as *mut c_void;
+            (*p).msg_namelen = mem::size_of::<sockaddr_storage>() as socklen_t;
+            (*p).msg_iov = iov.as_ptr() as *mut iovec;
+            (*p).msg_iovlen = iov.len() as _;
+            (*p).msg_control = msg_control as *mut c_void;
+            (*p).msg_controllen = msg_controllen as _;
+            (*p).msg_flags = 0;
+            mhdr.assume_init()
+        }
     };
 
     let ret = unsafe { libc::recvmsg(fd, &mut mhdr, flags.bits()) };
@@ -975,6 +865,10 @@ pub fn recvmsg<'a>(fd: RawFd, iov: &[IoVec<&mut [u8]>],
         let cmsghdr = unsafe {
             if mhdr.msg_controllen > 0 {
                 // got control message(s)
+                cmsg_buffer
+                    .as_mut()
+                    .unwrap()
+                    .set_len(mhdr.msg_controllen as usize);
                 debug_assert!(!mhdr.msg_control.is_null());
                 debug_assert!(msg_controllen >= mhdr.msg_controllen as usize);
                 CMSG_FIRSTHDR(&mhdr as *const msghdr)
@@ -984,7 +878,9 @@ pub fn recvmsg<'a>(fd: RawFd, iov: &[IoVec<&mut [u8]>],
         };
 
         let address = unsafe {
-            sockaddr_storage_to_addr(&address, mhdr.msg_namelen as usize).ok()
+            sockaddr_storage_to_addr(&address.assume_init(),
+                                     mhdr.msg_namelen as usize
+            ).ok()
         };
         RecvMsg {
             bytes: r as usize,
@@ -1120,12 +1016,15 @@ pub fn recv(sockfd: RawFd, buf: &mut [u8], flags: MsgFlags) -> Result<usize> {
 }
 
 /// Receive data from a connectionless or connection-oriented socket. Returns
-/// the number of bytes read and the socket address of the sender.
+/// the number of bytes read and, for connectionless sockets,  the socket
+/// address of the sender.
 ///
 /// [Further reading](http://pubs.opengroup.org/onlinepubs/9699919799/functions/recvfrom.html)
-pub fn recvfrom(sockfd: RawFd, buf: &mut [u8]) -> Result<(usize, SockAddr)> {
+pub fn recvfrom(sockfd: RawFd, buf: &mut [u8])
+    -> Result<(usize, Option<SockAddr>)>
+{
     unsafe {
-        let addr: sockaddr_storage = mem::zeroed();
+        let mut addr: sockaddr_storage = mem::zeroed();
         let mut len = mem::size_of::<sockaddr_storage>() as socklen_t;
 
         let ret = Errno::result(libc::recvfrom(
@@ -1133,11 +1032,14 @@ pub fn recvfrom(sockfd: RawFd, buf: &mut [u8]) -> Result<(usize, SockAddr)> {
             buf.as_ptr() as *mut c_void,
             buf.len() as size_t,
             0,
-            mem::transmute(&addr),
-            &mut len as *mut socklen_t))?;
+            &mut addr as *mut libc::sockaddr_storage as *mut libc::sockaddr,
+            &mut len as *mut socklen_t))? as usize;
 
-        sockaddr_storage_to_addr(&addr, len as usize)
-            .map(|addr| (ret as usize, addr))
+        match sockaddr_storage_to_addr(&addr, len as usize) {
+            Err(Error::Sys(Errno::ENOTCONN)) => Ok((ret, None)),
+            Ok(addr) => Ok((ret, Some(addr))),
+            Err(e) => Err(e)
+        }
     }
 }
 
@@ -1239,14 +1141,18 @@ pub fn setsockopt<O: SetSockOpt>(fd: RawFd, opt: O, val: &O::Val) -> Result<()> 
 /// [Further reading](http://pubs.opengroup.org/onlinepubs/9699919799/functions/getpeername.html)
 pub fn getpeername(fd: RawFd) -> Result<SockAddr> {
     unsafe {
-        let addr: sockaddr_storage = mem::uninitialized();
+        let mut addr = mem::MaybeUninit::uninit();
         let mut len = mem::size_of::<sockaddr_storage>() as socklen_t;
 
-        let ret = libc::getpeername(fd, mem::transmute(&addr), &mut len);
+        let ret = libc::getpeername(
+            fd,
+            addr.as_mut_ptr() as *mut libc::sockaddr,
+            &mut len
+        );
 
         Errno::result(ret)?;
 
-        sockaddr_storage_to_addr(&addr, len as usize)
+        sockaddr_storage_to_addr(&addr.assume_init(), len as usize)
     }
 }
 
@@ -1255,14 +1161,18 @@ pub fn getpeername(fd: RawFd) -> Result<SockAddr> {
 /// [Further reading](http://pubs.opengroup.org/onlinepubs/9699919799/functions/getsockname.html)
 pub fn getsockname(fd: RawFd) -> Result<SockAddr> {
     unsafe {
-        let addr: sockaddr_storage = mem::uninitialized();
+        let mut addr = mem::MaybeUninit::uninit();
         let mut len = mem::size_of::<sockaddr_storage>() as socklen_t;
 
-        let ret = libc::getsockname(fd, mem::transmute(&addr), &mut len);
+        let ret = libc::getsockname(
+            fd,
+            addr.as_mut_ptr() as *mut libc::sockaddr,
+            &mut len
+        );
 
         Errno::result(ret)?;
 
-        sockaddr_storage_to_addr(&addr, len as usize)
+        sockaddr_storage_to_addr(&addr.assume_init(), len as usize)
     }
 }
 
@@ -1280,14 +1190,14 @@ pub unsafe fn sockaddr_storage_to_addr(
         return Err(Error::Sys(Errno::ENOTCONN));
     }
 
-    match addr.ss_family as c_int {
+    match c_int::from(addr.ss_family) {
         libc::AF_INET => {
-            assert!(len as usize == mem::size_of::<sockaddr_in>());
+            assert_eq!(len as usize, mem::size_of::<sockaddr_in>());
             let ret = *(addr as *const _ as *const sockaddr_in);
             Ok(SockAddr::Inet(InetAddr::V4(ret)))
         }
         libc::AF_INET6 => {
-            assert!(len as usize == mem::size_of::<sockaddr_in6>());
+            assert_eq!(len as usize, mem::size_of::<sockaddr_in6>());
             Ok(SockAddr::Inet(InetAddr::V6(*(addr as *const _ as *const sockaddr_in6))))
         }
         libc::AF_UNIX => {
@@ -1304,6 +1214,11 @@ pub unsafe fn sockaddr_storage_to_addr(
         libc::AF_ALG => {
             use libc::sockaddr_alg;
             Ok(SockAddr::Alg(AlgAddr(*(addr as *const _ as *const sockaddr_alg))))
+        }
+        #[cfg(target_os = "linux")]
+        libc::AF_VSOCK => {
+            use libc::sockaddr_vm;
+            Ok(SockAddr::Vsock(VsockAddr(*(addr as *const _ as *const sockaddr_vm))))
         }
         af => panic!("unexpected address family {}", af),
     }

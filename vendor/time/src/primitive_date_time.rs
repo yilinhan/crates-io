@@ -1,25 +1,22 @@
-#[cfg(not(feature = "std"))]
-use crate::alloc_prelude::*;
-#[cfg(feature = "std")]
-use crate::Sign;
 use crate::{
-    format::parse::{parse, ParseResult, ParsedItems},
-    time, Date, DeferredFormat, Duration, OffsetDateTime, Time, UtcOffset, Weekday,
+    format::parse::{parse, ParsedItems},
+    internal_prelude::*,
 };
-#[cfg(feature = "std")]
+#[cfg(std)]
 use core::convert::{From, TryFrom};
 use core::{
     cmp::Ordering,
+    fmt::{self, Display},
     ops::{Add, AddAssign, Sub, SubAssign},
     time::Duration as StdDuration,
 };
-#[cfg(feature = "std")]
+#[cfg(std)]
 use std::time::SystemTime;
 
 /// Combined date and time.
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(serde, derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(
-    feature = "serde",
+    serde,
     serde(
         try_from = "crate::serde::PrimitiveDateTime",
         into = "crate::serde::PrimitiveDateTime"
@@ -55,8 +52,12 @@ impl PrimitiveDateTime {
     /// assert!(PrimitiveDateTime::now().year() >= 2019);
     /// ```
     #[inline(always)]
-    #[cfg(feature = "std")]
-    #[cfg_attr(doc, doc(cfg(feature = "std")))]
+    #[cfg(std)]
+    #[cfg_attr(docs, doc(cfg(feature = "std")))]
+    #[deprecated(
+        since = "0.2.7",
+        note = "This method returns a value that assumes an offset of UTC."
+    )]
     pub fn now() -> Self {
         SystemTime::now().into()
     }
@@ -71,9 +72,11 @@ impl PrimitiveDateTime {
     /// );
     /// ```
     #[inline(always)]
+    #[deprecated(since = "0.2.7", note = "This method assumes an offset of UTC.")]
     pub const fn unix_epoch() -> Self {
         Self {
-            // TODO Use `date!(1970-001)` when rustfmt can handle it.
+            // TODO(upstream) Use `date!(1970-001)` when rustfmt can handle it.
+            // Currently, not even `#[rustfmt::skip::macros(date)]` works.
             date: Date {
                 year: 1970,
                 ordinal: 1,
@@ -96,8 +99,13 @@ impl PrimitiveDateTime {
     /// );
     /// ```
     #[inline(always)]
+    #[deprecated(
+        since = "0.2.7",
+        note = "This method returns a value that assumes an offset of UTC."
+    )]
+    #[allow(deprecated)]
     pub fn from_unix_timestamp(timestamp: i64) -> Self {
-        Self::unix_epoch() + Duration::seconds(timestamp)
+        Self::unix_epoch() + timestamp.seconds()
     }
 
     /// Get the [Unix timestamp](https://en.wikipedia.org/wiki/Unix_time)
@@ -109,6 +117,8 @@ impl PrimitiveDateTime {
     /// assert_eq!(date!(2019-01-01).midnight().timestamp(), 1_546_300_800);
     /// ```
     #[inline(always)]
+    #[allow(deprecated)]
+    #[deprecated(since = "0.2.7", note = "This method assumes an offset of UTC.")]
     pub fn timestamp(self) -> i64 {
         (self - Self::unix_epoch()).whole_seconds()
     }
@@ -396,12 +406,67 @@ impl PrimitiveDateTime {
     ///     date!(2019-01-01).midnight().using_offset(offset!(UTC)).timestamp(),
     ///     1_546_300_800,
     /// );
+    /// assert_eq!(
+    ///     date!(2019-01-01).midnight().using_offset(offset!(-1)).timestamp(),
+    ///     1_546_300_800,
+    /// );
     /// ```
+    ///
+    /// This function is the same as calling `.assume_utc().to_offset(offset)`.
+    #[deprecated(
+        since = "0.2.7",
+        note = "Due to behavior not clear by its name alone, it is preferred to use \
+                `.assume_utc().to_offset(offset)`. This has the same behavior and can be used in \
+                `const` contexts."
+    )]
     #[inline(always)]
     pub const fn using_offset(self, offset: UtcOffset) -> OffsetDateTime {
         OffsetDateTime {
             utc_datetime: self,
             offset,
+        }
+    }
+
+    /// Assuming that the existing `PrimitiveDateTime` represents a moment in
+    /// the provided `UtcOffset`, return an `OffsetDateTime`.
+    ///
+    /// ```rust
+    /// # use time::{date, offset};
+    /// assert_eq!(
+    ///     date!(2019-01-01).midnight().using_offset(offset!(UTC)).timestamp(),
+    ///     1_546_300_800,
+    /// );
+    /// assert_eq!(
+    ///     date!(2019-01-01).midnight().assume_offset(offset!(-1)).timestamp(),
+    ///     1_546_304_400,
+    /// );
+    /// ```
+    #[inline(always)]
+    pub fn assume_offset(self, offset: UtcOffset) -> OffsetDateTime {
+        OffsetDateTime {
+            utc_datetime: self - offset.as_duration(),
+            offset,
+        }
+    }
+
+    /// Assuming that the existing `PrimitiveDateTime` represents a moment in
+    /// the UTC, return an `OffsetDateTime`.
+    ///
+    /// ```rust
+    /// # use time::date;
+    /// assert_eq!(
+    ///     date!(2019-01-01).midnight().assume_utc().timestamp(),
+    ///     1_546_300_800,
+    /// );
+    /// ```
+    ///
+    /// This function is the same as calling `.assume_offset(offset!(UTC))`,
+    /// except it is usable in `const` contexts.
+    #[inline(always)]
+    pub const fn assume_utc(self) -> OffsetDateTime {
+        OffsetDateTime {
+            utc_datetime: self,
+            offset: offset!(UTC),
         }
     }
 }
@@ -418,14 +483,11 @@ impl PrimitiveDateTime {
     /// );
     /// ```
     #[inline(always)]
-    pub fn format(self, format: &str) -> String {
-        DeferredFormat {
-            date: Some(self.date()),
-            time: Some(self.time()),
-            offset: None,
-            format: crate::format::parse_fmt_string(format),
-        }
-        .to_string()
+    pub fn format(self, format: impl AsRef<str>) -> String {
+        DeferredFormat::new(format.as_ref())
+            .with_date(self.date())
+            .with_time(self.time())
+            .to_string()
     }
 
     /// Attempt to parse a `PrimitiveDateTime` using the provided string.
@@ -446,8 +508,8 @@ impl PrimitiveDateTime {
     /// );
     /// ```
     #[inline(always)]
-    pub fn parse(s: &str, format: &str) -> ParseResult<Self> {
-        Self::try_from_parsed_items(parse(s, format)?)
+    pub fn parse(s: impl AsRef<str>, format: impl AsRef<str>) -> ParseResult<Self> {
+        Self::try_from_parsed_items(parse(s.as_ref(), format.as_ref())?)
     }
 
     /// Given the items already parsed, attempt to create a `PrimitiveDateTime`.
@@ -457,6 +519,13 @@ impl PrimitiveDateTime {
             date: Date::try_from_parsed_items(items)?,
             time: Time::try_from_parsed_items(items)?,
         })
+    }
+}
+
+impl Display for PrimitiveDateTime {
+    #[inline]
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{} {}", self.date(), self.time())
     }
 }
 
@@ -470,28 +539,14 @@ impl Add<Duration> for PrimitiveDateTime {
             + (duration.whole_nanoseconds() % 86_400_000_000_000) as i64;
 
         let date_modifier = if nanos < 0 {
-            -Duration::day()
+            (-1).days()
         } else if nanos >= 86_400_000_000_000 {
-            Duration::day()
+            1.days()
         } else {
-            Duration::zero()
+            0.days()
         };
 
         Self::new(self.date + duration + date_modifier, self.time + duration)
-    }
-}
-
-#[cfg(feature = "std")]
-impl Add<Duration> for SystemTime {
-    type Output = Self;
-
-    #[inline(always)]
-    fn add(self, duration: Duration) -> Self::Output {
-        match duration.sign_abs_std() {
-            (Sign::Zero, _) => self,
-            (Sign::Positive, duration) => self + duration,
-            (Sign::Negative, duration) => self - duration,
-        }
     }
 }
 
@@ -505,9 +560,9 @@ impl Add<StdDuration> for PrimitiveDateTime {
             + (duration.as_nanos() % 86_400_000_000_000) as u64;
 
         let date_modifier = if nanos >= 86_400_000_000_000 {
-            Duration::day()
+            1.days()
         } else {
-            Duration::zero()
+            0.days()
         };
 
         Self::new(self.date + duration + date_modifier, self.time + duration)
@@ -524,14 +579,6 @@ impl AddAssign<Duration> for PrimitiveDateTime {
 impl AddAssign<StdDuration> for PrimitiveDateTime {
     #[inline(always)]
     fn add_assign(&mut self, duration: StdDuration) {
-        *self = *self + duration;
-    }
-}
-
-#[cfg(feature = "std")]
-impl AddAssign<Duration> for SystemTime {
-    #[inline(always)]
-    fn add_assign(&mut self, duration: Duration) {
         *self = *self + duration;
     }
 }
@@ -554,23 +601,9 @@ impl Sub<StdDuration> for PrimitiveDateTime {
         let nanos = self.time.nanoseconds_since_midnight() as i64
             - (duration.as_nanos() % 86_400_000_000_000) as i64;
 
-        let date_modifier = if nanos < 0 {
-            -Duration::day()
-        } else {
-            Duration::zero()
-        };
+        let date_modifier = if nanos < 0 { (-1).days() } else { 0.days() };
 
         Self::new(self.date - duration + date_modifier, self.time - duration)
-    }
-}
-
-#[cfg(feature = "std")]
-impl Sub<Duration> for SystemTime {
-    type Output = Self;
-
-    #[inline(always)]
-    fn sub(self, duration: Duration) -> Self::Output {
-        (PrimitiveDateTime::from(self) - duration).into()
     }
 }
 
@@ -588,14 +621,6 @@ impl SubAssign<StdDuration> for PrimitiveDateTime {
     }
 }
 
-#[cfg(feature = "std")]
-impl SubAssign<Duration> for SystemTime {
-    #[inline(always)]
-    fn sub_assign(&mut self, duration: Duration) {
-        *self = *self - duration;
-    }
-}
-
 impl Sub<PrimitiveDateTime> for PrimitiveDateTime {
     type Output = Duration;
 
@@ -605,7 +630,8 @@ impl Sub<PrimitiveDateTime> for PrimitiveDateTime {
     }
 }
 
-#[cfg(feature = "std")]
+/// Deprecated since v0.2.7, as it assumes an offset of UTC.
+#[cfg(std)]
 impl Sub<SystemTime> for PrimitiveDateTime {
     type Output = Duration;
 
@@ -615,7 +641,8 @@ impl Sub<SystemTime> for PrimitiveDateTime {
     }
 }
 
-#[cfg(feature = "std")]
+/// Deprecated since v0.2.7, as it assumes an offset of UTC.
+#[cfg(std)]
 impl Sub<PrimitiveDateTime> for SystemTime {
     type Output = Duration;
 
@@ -632,7 +659,8 @@ impl PartialOrd for PrimitiveDateTime {
     }
 }
 
-#[cfg(feature = "std")]
+/// Deprecated since v0.2.7, as it assumes an offset of UTC.
+#[cfg(std)]
 impl PartialEq<SystemTime> for PrimitiveDateTime {
     #[inline(always)]
     fn eq(&self, rhs: &SystemTime) -> bool {
@@ -640,7 +668,8 @@ impl PartialEq<SystemTime> for PrimitiveDateTime {
     }
 }
 
-#[cfg(feature = "std")]
+/// Deprecated since v0.2.7, as it assumes an offset of UTC.
+#[cfg(std)]
 impl PartialEq<PrimitiveDateTime> for SystemTime {
     #[inline(always)]
     fn eq(&self, rhs: &PrimitiveDateTime) -> bool {
@@ -648,7 +677,8 @@ impl PartialEq<PrimitiveDateTime> for SystemTime {
     }
 }
 
-#[cfg(feature = "std")]
+/// Deprecated since v0.2.7, as it assumes an offset of UTC.
+#[cfg(std)]
 impl PartialOrd<SystemTime> for PrimitiveDateTime {
     #[inline(always)]
     fn partial_cmp(&self, other: &SystemTime) -> Option<Ordering> {
@@ -656,7 +686,8 @@ impl PartialOrd<SystemTime> for PrimitiveDateTime {
     }
 }
 
-#[cfg(feature = "std")]
+/// Deprecated since v0.2.7, as it assumes an offset of UTC.
+#[cfg(std)]
 impl PartialOrd<PrimitiveDateTime> for SystemTime {
     #[inline(always)]
     fn partial_cmp(&self, other: &PrimitiveDateTime) -> Option<Ordering> {
@@ -675,7 +706,9 @@ impl Ord for PrimitiveDateTime {
     }
 }
 
-#[cfg(feature = "std")]
+/// Deprecated since v0.2.7, as it returns a value that assumes an offset of UTC.
+#[cfg(std)]
+#[allow(deprecated)]
 impl From<SystemTime> for PrimitiveDateTime {
     // There is definitely some way to have this conversion be infallible, but
     // it won't be an issue for over 500 years.
@@ -692,27 +725,29 @@ impl From<SystemTime> for PrimitiveDateTime {
     }
 }
 
-#[cfg(feature = "std")]
-#[allow(clippy::fallible_impl_from)]
+/// Deprecated since v0.2.7, as it assumes an offset of UTC.
+#[cfg(std)]
+#[allow(clippy::fallible_impl_from, deprecated)]
 impl From<PrimitiveDateTime> for SystemTime {
     #[inline]
     fn from(datetime: PrimitiveDateTime) -> Self {
         let duration = datetime - PrimitiveDateTime::unix_epoch();
 
-        match duration.sign_abs_std() {
-            (Sign::Positive, duration) => Self::UNIX_EPOCH + duration,
-            (Sign::Negative, duration) => Self::UNIX_EPOCH - duration,
-            (Sign::Zero, _) => Self::UNIX_EPOCH,
+        if duration.is_zero() {
+            Self::UNIX_EPOCH
+        } else if duration.is_positive() {
+            Self::UNIX_EPOCH + duration.abs_std()
+        } else {
+            // duration.is_negative()
+            Self::UNIX_EPOCH - duration.abs_std()
         }
     }
 }
 
 #[cfg(test)]
-#[allow(clippy::result_unwrap_used)]
 #[rustfmt::skip::macros(date)]
 mod test {
     use super::*;
-    use crate::{date, offset, prelude::*, time};
 
     #[test]
     fn new() {
@@ -723,12 +758,14 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "std")]
+    #[cfg(std)]
+    #[allow(deprecated)]
     fn now() {
         assert!(PrimitiveDateTime::now().year() >= 2019);
     }
 
     #[test]
+    #[allow(deprecated)]
     fn unix_epoch() {
         assert_eq!(
             PrimitiveDateTime::unix_epoch(),
@@ -737,6 +774,7 @@ mod test {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn from_unix_timestamp() {
         assert_eq!(
             PrimitiveDateTime::from_unix_timestamp(0),
@@ -749,6 +787,7 @@ mod test {
     }
 
     #[test]
+    #[allow(deprecated)]
     fn timestamp() {
         assert_eq!(PrimitiveDateTime::unix_epoch().timestamp(), 0);
         assert_eq!(date!(2019-01-01).midnight().timestamp(), 1_546_300_800);
@@ -888,6 +927,7 @@ mod test {
         );
     }
 
+    #[allow(deprecated)]
     #[test]
     fn using_offset() {
         assert_eq!(
@@ -895,6 +935,32 @@ mod test {
                 .midnight()
                 .using_offset(offset!(UTC))
                 .timestamp(),
+            1_546_300_800,
+        );
+    }
+
+    #[test]
+    fn assume_offset() {
+        assert_eq!(
+            date!(2019-01-01)
+                .midnight()
+                .assume_offset(offset!(UTC))
+                .timestamp(),
+            1_546_300_800,
+        );
+        assert_eq!(
+            date!(2019-01-01)
+                .midnight()
+                .assume_offset(offset!(-1))
+                .timestamp(),
+            1_546_304_400,
+        );
+    }
+
+    #[test]
+    fn assume_utc() {
+        assert_eq!(
+            date!(2019-01-01).midnight().assume_utc().timestamp(),
             1_546_300_800,
         );
     }
@@ -944,27 +1010,6 @@ mod test {
         assert_eq!(
             date!(1999-12-31).with_time(time!(23:00)) + 1.hours(),
             date!(2000-01-01).midnight(),
-        );
-    }
-
-    #[test]
-    #[cfg(feature = "std")]
-    fn std_add_duration() {
-        assert_eq!(
-            SystemTime::from(date!(2019-01-01).midnight()) + 5.days(),
-            SystemTime::from(date!(2019-01-06).midnight()),
-        );
-        assert_eq!(
-            SystemTime::from(date!(2019-12-31).midnight()) + 1.days(),
-            SystemTime::from(date!(2020-01-01).midnight()),
-        );
-        assert_eq!(
-            SystemTime::from(date!(2019-12-31).with_time(time!(23:59:59))) + 2.seconds(),
-            SystemTime::from(date!(2020-01-01).with_time(time!(0:00:01))),
-        );
-        assert_eq!(
-            SystemTime::from(date!(2020-01-01).with_time(time!(0:00:01))) + (-2).seconds(),
-            SystemTime::from(date!(2019-12-31).with_time(time!(23:59:59))),
         );
     }
 
@@ -1019,26 +1064,6 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "std")]
-    fn std_add_assign_duration() {
-        let mut ny19 = SystemTime::from(date!(2019-01-01).midnight());
-        ny19 += 5.days();
-        assert_eq!(ny19, date!(2019-01-06).midnight());
-
-        let mut nye20 = SystemTime::from(date!(2019-12-31).midnight());
-        nye20 += 1.days();
-        assert_eq!(nye20, date!(2020-01-01).midnight());
-
-        let mut nye20t = SystemTime::from(date!(2019-12-31).with_time(time!(23:59:59)));
-        nye20t += 2.seconds();
-        assert_eq!(nye20t, date!(2020-01-01).with_time(time!(0:00:01)));
-
-        let mut ny20t = SystemTime::from(date!(2020-01-01).with_time(time!(0:00:01)));
-        ny20t += (-2).seconds();
-        assert_eq!(ny20t, date!(2019-12-31).with_time(time!(23:59:59)));
-    }
-
-    #[test]
     fn sub_duration() {
         assert_eq!(
             date!(2019-01-06).midnight() - 5.days(),
@@ -1079,27 +1104,6 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "std")]
-    fn std_sub_duration() {
-        assert_eq!(
-            SystemTime::from(date!(2019-01-06).midnight()) - 5.days(),
-            SystemTime::from(date!(2019-01-01).midnight()),
-        );
-        assert_eq!(
-            SystemTime::from(date!(2020-01-01).midnight()) - 1.days(),
-            SystemTime::from(date!(2019-12-31).midnight()),
-        );
-        assert_eq!(
-            SystemTime::from(date!(2020-01-01).with_time(time!(0:00:01))) - 2.seconds(),
-            SystemTime::from(date!(2019-12-31).with_time(time!(23:59:59))),
-        );
-        assert_eq!(
-            SystemTime::from(date!(2019-12-31).with_time(time!(23:59:59))) - (-2).seconds(),
-            SystemTime::from(date!(2020-01-01).with_time(time!(0:00:01))),
-        );
-    }
-
-    #[test]
     fn sub_assign_duration() {
         let mut ny19 = date!(2019-01-06).midnight();
         ny19 -= 5.days();
@@ -1134,26 +1138,6 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "std")]
-    fn std_sub_assign_duration() {
-        let mut ny19 = SystemTime::from(date!(2019-01-06).midnight());
-        ny19 -= 5.days();
-        assert_eq!(ny19, date!(2019-01-01).midnight());
-
-        let mut ny20 = SystemTime::from(date!(2020-01-01).midnight());
-        ny20 -= 1.days();
-        assert_eq!(ny20, date!(2019-12-31).midnight());
-
-        let mut ny20t = SystemTime::from(date!(2020-01-01).with_time(time!(0:00:01)));
-        ny20t -= 2.seconds();
-        assert_eq!(ny20t, date!(2019-12-31).with_time(time!(23:59:59)));
-
-        let mut nye20t = SystemTime::from(date!(2019-12-31).with_time(time!(23:59:59)));
-        nye20t -= (-2).seconds();
-        assert_eq!(nye20t, date!(2020-01-01).with_time(time!(0:00:01)));
-    }
-
-    #[test]
     fn sub_datetime() {
         assert_eq!(
             date!(2019-01-02).midnight() - date!(2019-01-01).midnight(),
@@ -1174,7 +1158,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "std")]
+    #[cfg(std)]
     fn std_sub_datetime() {
         assert_eq!(
             SystemTime::from(date!(2019-01-02).midnight()) - date!(2019-01-01).midnight(),
@@ -1195,7 +1179,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "std")]
+    #[cfg(std)]
     fn sub_std() {
         assert_eq!(
             date!(2019-01-02).midnight() - SystemTime::from(date!(2019-01-01).midnight()),
@@ -1311,7 +1295,8 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "std")]
+    #[cfg(std)]
+    #[allow(deprecated)]
     fn eq_std() {
         let now_datetime = PrimitiveDateTime::now();
         let now_systemtime = SystemTime::from(now_datetime);
@@ -1319,16 +1304,16 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "std")]
+    #[cfg(std)]
+    #[allow(deprecated)]
     fn std_eq() {
-        #[cfg(feature = "std")]
         let now_datetime = PrimitiveDateTime::now();
         let now_systemtime = SystemTime::from(now_datetime);
         assert_eq!(now_datetime, now_systemtime);
     }
 
     #[test]
-    #[cfg(feature = "std")]
+    #[cfg(std)]
     fn ord_std() {
         assert_eq!(
             date!(2019-01-01).midnight(),
@@ -1375,7 +1360,7 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "std")]
+    #[cfg(std)]
     fn std_ord() {
         assert_eq!(
             SystemTime::from(date!(2019-01-01).midnight()),
@@ -1422,7 +1407,8 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "std")]
+    #[cfg(std)]
+    #[allow(deprecated)]
     fn from_std() {
         assert_eq!(
             PrimitiveDateTime::from(SystemTime::UNIX_EPOCH),
@@ -1431,7 +1417,8 @@ mod test {
     }
 
     #[test]
-    #[cfg(feature = "std")]
+    #[cfg(std)]
+    #[allow(deprecated)]
     fn to_std() {
         assert_eq!(
             SystemTime::from(PrimitiveDateTime::unix_epoch()),

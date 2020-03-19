@@ -46,7 +46,7 @@ cfg_if! {
 }
 
 /// Sets the platform-specific errno to no-error
-unsafe fn clear() -> () {
+unsafe fn clear() {
     *errno_location() = 0;
 }
 
@@ -70,7 +70,7 @@ impl Errno {
         from_i32(err)
     }
 
-    pub unsafe fn clear() -> () {
+    pub unsafe fn clear() {
         clear()
     }
 
@@ -111,11 +111,7 @@ impl ErrnoSentinel for libc::sighandler_t {
     fn sentinel() -> Self { libc::SIG_ERR }
 }
 
-impl error::Error for Errno {
-    fn description(&self) -> &str {
-        self.desc()
-    }
-}
+impl error::Error for Errno {}
 
 impl fmt::Display for Errno {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {

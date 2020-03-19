@@ -257,18 +257,30 @@ fn timezone_offset_internal<F>(mut s: &str, mut consume_colon: F, allow_missing_
     Ok((s, if negative {-seconds} else {seconds}))
 }
 
-/// Same to `timezone_offset` but also allows for `z`/`Z` which is same to `+00:00`.
+/// Same as `timezone_offset` but also allows for `z`/`Z` which is the same as `+00:00`.
 pub fn timezone_offset_zulu<F>(s: &str, colon: F)
 -> ParseResult<(&str, i32)>
     where F: FnMut(&str) -> ParseResult<&str>
 {
-    match s.as_bytes().first() {
+    let bytes = s.as_bytes();
+    match bytes.first() {
         Some(&b'z') | Some(&b'Z') => Ok((&s[1..], 0)),
+        Some(&b'u') | Some(&b'U') => {
+            if bytes.len() >= 3 {
+                let (b, c) = (bytes[1], bytes[2]);
+                match (b | 32, c | 32) {
+                    (b't', b'c') => Ok((&s[3..], 0)),
+                    _ => Err(INVALID),
+                }
+            } else {
+                Err(INVALID)
+            }
+        }
         _ => timezone_offset(s, colon),
     }
 }
 
-/// Same to `timezone_offset` but also allows for `z`/`Z` which is same to
+/// Same as `timezone_offset` but also allows for `z`/`Z` which is the same as
 /// `+00:00`, and allows missing minutes entirely.
 pub fn timezone_offset_permissive<F>(s: &str, colon: F)
 -> ParseResult<(&str, i32)>
@@ -280,7 +292,7 @@ pub fn timezone_offset_permissive<F>(s: &str, colon: F)
     }
 }
 
-/// Same to `timezone_offset` but also allows for RFC 2822 legacy timezones.
+/// Same as `timezone_offset` but also allows for RFC 2822 legacy timezones.
 /// May return `None` which indicates an insufficient offset data (i.e. `-0000`).
 pub fn timezone_offset_2822(s: &str) -> ParseResult<(&str, Option<i32>)> {
     // tries to parse legacy time zone names
@@ -308,11 +320,7 @@ pub fn timezone_offset_2822(s: &str) -> ParseResult<(&str, Option<i32>)> {
         }
     } else {
         let (s_, offset) = timezone_offset(s, |s| Ok(s))?;
-        if offset == 0 && s.starts_with('-') { // -0000 is not same to +0000
-            Ok((s_, None))
-        } else {
-            Ok((s_, Some(offset)))
-        }
+        Ok((s_, Some(offset)))
     }
 }
 

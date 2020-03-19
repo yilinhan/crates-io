@@ -12,9 +12,9 @@
 
 [package]
 name = "regex"
-version = "1.3.4"
+version = "1.3.5"
 authors = ["The Rust Project Developers"]
-exclude = ["/.travis.yml", "/appveyor.yml", "/ci/*", "/scripts/*"]
+exclude = ["/scripts/*", "/.github/*"]
 autotests = false
 description = "An implementation of regular expressions for Rust. This implementation uses\nfinite automata and guarantees linear time matching on all inputs.\n"
 homepage = "https://github.com/rust-lang/regex"
@@ -80,7 +80,7 @@ version = "2.2.1"
 optional = true
 
 [dependencies.regex-syntax]
-version = "0.6.14"
+version = "0.6.17"
 default-features = false
 
 [dependencies.thread_local]
@@ -118,8 +118,3 @@ unicode-script = ["regex-syntax/unicode-script"]
 unicode-segment = ["regex-syntax/unicode-segment"]
 unstable = ["pattern"]
 use_std = ["std"]
-[badges.appveyor]
-repository = "rust-lang-libs/regex"
-
-[badges.travis-ci]
-repository = "rust-lang/regex"

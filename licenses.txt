@@ -3,14 +3,14 @@ ansi_term: MIT
 anyhow: MIT OR Apache-2.0
 arc-swap: Apache-2.0/MIT
 atty: MIT
-autocfg-0.1.7: Apache-2.0/MIT
 autocfg: Apache-2.0 OR MIT
 backtrace: MIT/Apache-2.0
 backtrace-sys: MIT/Apache-2.0
-base16: CC0-1.0
 base64-0.10.1: MIT/Apache-2.0
 base64-0.9.3: MIT/Apache-2.0
 base64: MIT/Apache-2.0
+base-x: MIT
+binascii: MIT
 bitflags: MIT/Apache-2.0
 bit-vec: MIT/Apache-2.0
 bstr: MIT OR Apache-2.0
@@ -18,7 +18,6 @@ bumpalo: MIT/Apache-2.0
 byteorder: Unlicense OR MIT
 bytes-0.4.12: MIT
 bytes: MIT
-c2-chacha: MIT/Apache-2.0
 cc: MIT/Apache-2.0
 cfg-if: MIT/Apache-2.0
 chrono: MIT/Apache-2.0
@@ -30,6 +29,8 @@ clap-port-flag: MIT OR Apache-2.0
 clap-verbosity-flag: MIT OR Apache-2.0
 cmake: MIT/Apache-2.0
 cookie: MIT/Apache-2.0
+core-foundation: MIT / Apache-2.0
+core-foundation-sys: MIT / Apache-2.0
 crossbeam-channel: MIT/Apache-2.0 AND BSD-2-Clause
 crossbeam-deque: MIT/Apache-2.0
 crossbeam-epoch: MIT/Apache-2.0
@@ -39,7 +40,10 @@ ctrlc: MIT/Apache-2.0
 devise_codegen: MIT/Apache-2.0
 devise_core: MIT/Apache-2.0
 devise: MIT/Apache-2.0
+discard: MIT
+dtoa: MIT OR Apache-2.0
 either: MIT/Apache-2.0
+encoding_rs: MIT/Apache-2.0
 env_logger-0.5.13: MIT/Apache-2.0
 env_logger: MIT/Apache-2.0
 exitfailure: MIT OR Apache-2.0
@@ -47,16 +51,35 @@ failure_derive: MIT OR Apache-2.0
 failure: MIT OR Apache-2.0
 fixedbitset: MIT/Apache-2.0
 fnv: Apache-2.0 / MIT
+foreign-types: MIT/Apache-2.0
+foreign-types-shared: MIT/Apache-2.0
+fuchsia-zircon: BSD-3-Clause
+fuchsia-zircon-sys: BSD-3-Clause
+futures-channel: MIT OR Apache-2.0
+futures-core: MIT OR Apache-2.0
+futures-executor: MIT OR Apache-2.0
+futures-io: MIT OR Apache-2.0
+futures-macro: MIT OR Apache-2.0
+futures: MIT OR Apache-2.0
+futures-sink: MIT OR Apache-2.0
+futures-task: MIT OR Apache-2.0
+futures-util: MIT OR Apache-2.0
 getrandom: MIT OR Apache-2.0
+glob: MIT/Apache-2.0
 globset: Unlicense/MIT
 globwalk: MIT
+h2: MIT
 heck: MIT OR Apache-2.0
 hermit-abi: MIT/Apache-2.0
 hex: MIT OR Apache-2.0
 httparse: MIT/Apache-2.0
+http-body: MIT
+http: MIT/Apache-2.0
 humantime: MIT/Apache-2.0
+hyper-0.10.16: MIT
 hyper: MIT
 hyper-sync-rustls: MIT/Apache-2.0
+hyper-tls: MIT/Apache-2.0
 idna-0.1.5: MIT/Apache-2.0
 idna: MIT/Apache-2.0
 ignore: Unlicense/MIT
@@ -65,31 +88,45 @@ iovec: MIT/Apache-2.0
 itertools: MIT/Apache-2.0
 itoa: MIT OR Apache-2.0
 js-sys: MIT/Apache-2.0
+kernel32-sys: MIT
 language-tags: MIT
 lazy_static: MIT/Apache-2.0
 libc: MIT OR Apache-2.0
 log-0.3.9: MIT/Apache-2.0
 log: MIT OR Apache-2.0
 matches: MIT
+maybe-uninit: Apache-2.0 OR MIT
 memchr: Unlicense/MIT
 memoffset: MIT
-mime: MIT
+mime-0.2.6: MIT
+mime_guess: MIT
+mime: MIT/Apache-2.0
+mio: MIT
+miow: MIT/Apache-2.0
 multimap: MIT/Apache-2.0
 nan-preserving-float: Unlicense
+native-tls: MIT/Apache-2.0
 net2: MIT/Apache-2.0
 nix-0.13.1: MIT
 nix: MIT
-nom: MIT
 num-bigint: MIT/Apache-2.0
 num_cpus: MIT/Apache-2.0
 num-integer: MIT/Apache-2.0
 num-traits: MIT/Apache-2.0
+openssl: Apache-2.0
+openssl-probe: MIT/Apache-2.0
+openssl-sys: MIT
 pear_codegen: MIT/Apache-2.0
 pear: MIT/Apache-2.0
 pem: MIT
 percent-encoding-1.0.1: MIT/Apache-2.0
 percent-encoding: MIT/Apache-2.0
 petgraph: MIT/Apache-2.0
+pin-project: Apache-2.0 OR MIT
+pin-project-internal: Apache-2.0 OR MIT
+pin-project-lite: Apache-2.0 OR MIT
+pin-utils: MIT OR Apache-2.0
+pkg-config: MIT/Apache-2.0
 ppv-lite86: MIT/Apache-2.0
 pretty_env_logger: MIT/Apache-2.0
 privdrop: ISC
@@ -98,6 +135,7 @@ proc-macro2: MIT OR Apache-2.0
 proc-macro-error-attr: MIT OR Apache-2.0
 proc-macro-error: MIT OR Apache-2.0
 proc-macro-hack: MIT OR Apache-2.0
+proc-macro-nested: MIT OR Apache-2.0
 profiler_builtins: License not found
 prost: Apache-2.0
 prost-build: Apache-2.0
@@ -107,7 +145,7 @@ quick-error: MIT/Apache-2.0
 quicli: MIT OR Apache-2.0
 quote-0.6.13: MIT OR Apache-2.0
 quote: MIT OR Apache-2.0
-rand_chacha: MIT/Apache-2.0
+rand_chacha: MIT OR Apache-2.0
 rand_core-0.3.1: MIT/Apache-2.0
 rand_core-0.4.2: MIT/Apache-2.0
 rand_core: MIT OR Apache-2.0
@@ -120,6 +158,7 @@ redox_syscall: MIT
 regex: MIT OR Apache-2.0
 regex-syntax: MIT/Apache-2.0
 remove_dir_all: MIT/Apache-2.0
+reqwest: MIT/Apache-2.0
 ring: see license file at ring/LICENSE
 rocket_codegen: MIT/Apache-2.0
 rocket_http: MIT/Apache-2.0
@@ -131,13 +170,17 @@ rustversion: MIT OR Apache-2.0
 ryu: Apache-2.0 OR BSL-1.0
 safemem: MIT/Apache-2.0
 same-file: Unlicense/MIT
+schannel: MIT
 scopeguard: MIT/Apache-2.0
 sct: Apache-2.0/ISC/MIT
+security-framework: MIT/Apache-2.0
+security-framework-sys: MIT/Apache-2.0
 semver: MIT/Apache-2.0
 semver-parser: MIT/Apache-2.0
 serde_derive: MIT OR Apache-2.0
 serde_json: MIT OR Apache-2.0
 serde: MIT OR Apache-2.0
+serde_urlencoded: MIT/Apache-2.0
 sgx_alloc: see license file at sgx_alloc/LICENSE
 sgx_backtrace_sys: see license file at sgx_backtrace_sys/LICENSE
 sgx_build_helper: see license file at sgx_build_helper/LICENSE
@@ -155,12 +198,18 @@ sgx_types: see license file at sgx_types/LICENSE
 sgx_ucrypto: see license file at sgx_ucrypto/LICENSE
 sgx_unwind: see license file at sgx_unwind/LICENSE
 sgx_urts: see license file at sgx_urts/LICENSE
+sha1: BSD-3-Clause
 signal-hook: Apache-2.0/MIT
 signal-hook-registry: Apache-2.0/MIT
+slab: MIT
 smallvec: MIT/Apache-2.0
-sourcefile: Apache-2.0/MIT
 spin: MIT
+standback: MIT OR Apache-2.0
 state: MIT/Apache-2.0
+stdweb-derive: MIT/Apache-2.0
+stdweb-internal-macros: MIT/Apache-2.0
+stdweb-internal-runtime: MIT/Apache-2.0
+stdweb: MIT/Apache-2.0
 strsim: MIT
 structopt-0.2.18: Apache-2.0/MIT
 structopt: Apache-2.0/MIT
@@ -181,11 +230,18 @@ time-0.1.42: MIT/Apache-2.0
 time-macros-impl: MIT OR Apache-2.0
 time-macros: MIT OR Apache-2.0
 time: MIT OR Apache-2.0
+tokio: MIT
+tokio-tls: MIT
+tokio-util-0.2.0: MIT
+tokio-util: MIT
 toml-0.4.10: MIT/Apache-2.0
 toml: MIT/Apache-2.0
+tower-service: MIT
 traitobject: MIT/Apache-2.0
+try-lock: MIT
 typeable: MIT
-unicase: MIT
+unicase-1.4.2: MIT
+unicase: MIT/Apache-2.0
 unicode-bidi: MIT / Apache-2.0
 unicode-normalization: MIT/Apache-2.0
 unicode-segmentation: MIT/Apache-2.0
@@ -196,6 +252,7 @@ untrusted: ISC
 url-1.7.2: MIT/Apache-2.0
 url: MIT/Apache-2.0
 uuid: Apache-2.0 OR MIT
+vcpkg: MIT/Apache-2.0
 vec_map: MIT/Apache-2.0
 version_check-0.1.5: MIT/Apache-2.0
 version_check: MIT/Apache-2.0
@@ -203,23 +260,27 @@ void: MIT
 wabt: Apache-2.0
 wabt-sys: Apache-2.0
 walkdir: Unlicense/MIT
+want: MIT
 wasi: Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
 wasm-bindgen-backend: MIT/Apache-2.0
+wasm-bindgen-futures: MIT/Apache-2.0
 wasm-bindgen-macro: MIT/Apache-2.0
 wasm-bindgen-macro-support: MIT/Apache-2.0
 wasm-bindgen: MIT/Apache-2.0
 wasm-bindgen-shared: MIT/Apache-2.0
-wasm-bindgen-webidl: MIT/Apache-2.0
 webpki-roots-0.17.0: MPL-2.0
 webpki-roots: MPL-2.0
 webpki: see license file at webpki/LICENSE
 web-sys: MIT/Apache-2.0
-weedle: MIT
 which: MIT
+winapi-0.2.8: MIT
+winapi-build: MIT
 winapi-i686-pc-windows-gnu: MIT/Apache-2.0
 winapi: MIT/Apache-2.0
 winapi-util: Unlicense/MIT
 winapi-x86_64-pc-windows-gnu: MIT/Apache-2.0
+winreg: MIT
+ws2_32-sys: MIT
 yansi-0.4.0: MIT/Apache-2.0
 yansi: MIT/Apache-2.0
 yasna: MIT/Apache-2.0

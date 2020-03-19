@@ -12,7 +12,7 @@
 
 [package]
 name = "serde_derive"
-version = "1.0.104"
+version = "1.0.105"
 authors = ["Erick Tryzelaar <erick.tryzelaar@gmail.com>", "David Tolnay <dtolnay@gmail.com>"]
 include = ["Cargo.toml", "src/**/*.rs", "crates-io.md", "README.md", "LICENSE-APACHE", "LICENSE-MIT"]
 description = "Macros 1.1 implementation of #[derive(Serialize, Deserialize)]"
@@ -22,6 +22,8 @@ readme = "crates-io.md"
 keywords = ["serde", "serialization", "no_std"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/serde-rs/serde"
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
 
 [lib]
 name = "serde_derive"

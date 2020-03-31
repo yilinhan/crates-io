@@ -58,9 +58,9 @@ http            = "0.2"
 
 rocket           = { git = "https://github.com/SergioBenitez/Rocket", features = ["tls"] }
 
-sgx_cov              = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.0" }
-sgx_tcrypto          = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.0" }
-sgx_ucrypto          = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.0" }
-sgx_tse              = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.0" }
-sgx_tstd             = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.0" }
-sgx_urts             = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.0" }
+sgx_cov              = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.1" }
+sgx_tcrypto          = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.1" }
+sgx_ucrypto          = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.1" }
+sgx_tse              = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.1" }
+sgx_tstd             = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.1" }
+sgx_urts             = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.1" }

@@ -18,11 +18,16 @@
 //! # align alloc crate for Rust SGX SDK
 //!
 
-use sgx_types::*;
 use core::alloc::Layout;
 use core::ptr::NonNull;
 use core::fmt;
 pub use self::platform::*;
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct AlignReq {
+    pub offset: usize,
+    pub len: usize,
+}
 
 pub struct AlignAlloc;
 
@@ -39,12 +44,12 @@ impl AlignAlloc {
     }
 
     #[inline]
-    pub unsafe fn alloc_with_req(&mut self, layout: Layout, align_req: &[align_req_t]) -> Result<NonNull<u8>, AlighAllocErr> {
+    pub unsafe fn alloc_with_req(&mut self, layout: Layout, align_req: &[AlignReq]) -> Result<NonNull<u8>, AlighAllocErr> {
         NonNull::new(platform::alloc_with_req(layout, align_req)).ok_or(AlighAllocErr)
     }
 
     #[inline]
-    pub unsafe fn alloc_with_req_zeroed(&mut self, layout: Layout, align_req: &[align_req_t])
+    pub unsafe fn alloc_with_req_zeroed(&mut self, layout: Layout, align_req: &[AlignReq])
         -> Result<NonNull<u8>, AlighAllocErr> {
         NonNull::new(platform::alloc_with_req_zeroed(layout, align_req)).ok_or(AlighAllocErr)
     }
@@ -61,12 +66,12 @@ impl AlignAlloc {
     }
 
     #[inline]
-    pub unsafe fn dealloc(&mut self, ptr: core::ptr::NonNull<u8>, layout: Layout) {
+    pub unsafe fn dealloc(&mut self, ptr: NonNull<u8>, layout: Layout) {
         platform::dealloc(ptr.as_ptr(), layout)
     }
 
     #[inline]
-    pub fn pad_align_to(&self, layout: Layout, align_req: &[align_req_t]) -> Result<Layout, AlignLayoutErr> {
+    pub fn pad_align_to(&self, layout: Layout, align_req: &[AlignReq]) -> Result<Layout, AlignLayoutErr> {
         platform::pad_align_to(layout, align_req)
     }
 }
@@ -90,8 +95,8 @@ impl fmt::Display for AlignLayoutErr {
 }
 
 mod platform {
-    use sgx_types::*;
     use super::AlignLayoutErr;
+    use super::AlignReq;
     use core::ffi::c_void;
     use core::ptr;
     use core::mem;
@@ -100,18 +105,18 @@ mod platform {
 
     #[inline]
     pub unsafe fn alloc(layout: Layout) -> *mut u8 {
-        let req: [align_req_t; 1] = [align_req_t{offset: 0, len: layout.size()}];
+        let req: [AlignReq; 1] = [AlignReq{ offset: 0, len: layout.size() }];
         let align_req = &req[..];
         alloc_with_req(layout, align_req)
     }
 
-    pub unsafe fn alloc_with_req(layout: Layout, align_req: &[align_req_t]) -> *mut u8 {
+    pub unsafe fn alloc_with_req(layout: Layout, align_req: &[AlignReq]) -> *mut u8 {
         if !check_layout(&layout) {
             return ptr::null_mut();
         }
         let align_layout = match
             if align_req.len() == 0 {
-                let req: [align_req_t; 1] = [align_req_t{offset: 0, len: layout.size()}];
+                let req: [AlignReq; 1] = [AlignReq{ offset: 0, len: layout.size() }];
                 pad_align_to(layout, &req[..])
             } else {
                 pad_align_to(layout, align_req)
@@ -130,18 +135,18 @@ mod platform {
 
     #[inline]
     pub unsafe fn alloc_zeroed(layout: Layout) -> *mut u8 {
-        let req: [align_req_t; 1] = [align_req_t{offset: 0, len: layout.size()}];
+        let req: [AlignReq; 1] = [AlignReq{ offset: 0, len: layout.size() }];
         let align_req = &req[..];
         alloc_with_req_zeroed(layout, align_req)
     }
 
-    pub unsafe fn alloc_with_req_zeroed(layout: Layout, align_req: &[align_req_t]) -> *mut u8 {
+    pub unsafe fn alloc_with_req_zeroed(layout: Layout, align_req: &[AlignReq]) -> *mut u8 {
         if !check_layout(&layout) {
             return ptr::null_mut();
         }
         let align_layout = match
             if align_req.len() == 0 {
-                let req: [align_req_t; 1] = [align_req_t{offset: 0, len: layout.size()}];
+                let req: [AlignReq; 1] = [AlignReq{ offset: 0, len: layout.size() }];
                 pad_align_to(layout, &req[..])
             } else {
                 pad_align_to(layout, align_req)
@@ -192,13 +197,13 @@ mod platform {
         libc::free(raw as *mut c_void)
     }
 
-    pub fn pad_align_to(layout: Layout, align_req: &[align_req_t]) -> Result<Layout, AlignLayoutErr> {
+    pub fn pad_align_to(layout: Layout, align_req: &[AlignReq]) -> Result<Layout, AlignLayoutErr> {
         let pad = padding_needed_for(layout, align_req)?;
         let align = align_needed_for(layout, pad)?;
         Layout::from_size_align(pad + align + layout.size(), align).map_err(|_|AlignLayoutErr)
     }
 
-    fn padding_needed_for(layout: Layout, align_req: &[align_req_t]) -> Result<usize, AlignLayoutErr> {
+    fn padding_needed_for(layout: Layout, align_req: &[AlignReq]) -> Result<usize, AlignLayoutErr> {
         if !check_layout(&layout) {
             return Err(AlignLayoutErr);
         }
@@ -225,7 +230,7 @@ mod platform {
 
     #[inline]
     fn check_overflow(buf: usize, len: usize) -> bool {
-        ((buf + len < len) || (buf + len < buf))
+        (buf + len < len) || (buf + len < buf)
     }
 
     fn check_layout(layout: &Layout) -> bool {
@@ -237,7 +242,7 @@ mod platform {
         }
     }
 
-    fn check_align_req(size: usize, align_req: &[align_req_t]) -> bool {
+    fn check_align_req(size: usize, align_req: &[AlignReq]) -> bool {
         if align_req.len() == 0 {
             return false;
         }
@@ -329,7 +334,7 @@ mod platform {
         }
     }
 
-    fn make_bitmap(align_req: &[align_req_t]) -> i64 {
+    fn make_bitmap(align_req: &[AlignReq]) -> i64 {
         let mut bmp: i64 = 0;
         for req in align_req {
             if req.len > 63 {
@@ -345,7 +350,7 @@ mod platform {
         use core::ffi::c_void;
         type size_t = usize;
         extern {
-            pub fn malloc(size: size_t) -> * mut c_void;
+            pub fn malloc(size: size_t) -> *mut c_void;
             pub fn free(p: *mut c_void);
         }
     }

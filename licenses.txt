@@ -36,6 +36,7 @@ crossbeam-deque: MIT/Apache-2.0
 crossbeam-epoch: MIT/Apache-2.0
 crossbeam-queue: MIT/Apache-2.0 AND BSD-2-Clause
 crossbeam-utils: MIT/Apache-2.0
+ctor: Apache-2.0 OR MIT
 ctrlc: MIT/Apache-2.0
 devise_codegen: MIT/Apache-2.0
 devise_core: MIT/Apache-2.0
@@ -65,6 +66,7 @@ futures-sink: MIT OR Apache-2.0
 futures-task: MIT OR Apache-2.0
 futures-util: MIT OR Apache-2.0
 getrandom: MIT OR Apache-2.0
+ghost: MIT OR Apache-2.0
 glob: MIT/Apache-2.0
 globset: Unlicense/MIT
 globwalk: MIT
@@ -85,6 +87,8 @@ idna-0.1.5: MIT/Apache-2.0
 idna: MIT/Apache-2.0
 ignore: Unlicense/MIT
 indexmap: Apache-2.0/MIT
+inventory-impl: MIT OR Apache-2.0
+inventory: MIT OR Apache-2.0
 iovec: MIT/Apache-2.0
 itertools: MIT/Apache-2.0
 itoa: MIT OR Apache-2.0

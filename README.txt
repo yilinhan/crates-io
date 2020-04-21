@@ -14,7 +14,7 @@ binascii                      0.1.4
 bit-vec                       0.6.1
 bitflags                      1.2.1
 bstr                          0.2.12
-bumpalo                       3.2.0
+bumpalo                       3.2.1
 byteorder                     1.3.4
 bytes                         0.4.12
 bytes                         0.5.4
@@ -36,6 +36,7 @@ crossbeam-deque               0.7.3
 crossbeam-epoch               0.8.2
 crossbeam-queue               0.2.1
 crossbeam-utils               0.7.2
+ctor                          0.1.13
 ctrlc                         3.1.4
 discard                       1.0.4
 dtoa                          0.4.5
@@ -62,6 +63,7 @@ futures-sink                  0.3.4
 futures-task                  0.3.4
 futures-util                  0.3.4
 getrandom                     0.1.14
+ghost                         0.1.1
 glob                          0.3.0
 globset                       0.4.5
 globwalk                      0.3.1
@@ -81,6 +83,8 @@ idna                          0.1.5
 idna                          0.2.0
 ignore                        0.4.12
 indexmap                      1.3.2
+inventory                     0.1.6
+inventory-impl                0.1.6
 iovec                         0.1.4
 itertools                     0.8.2
 itoa                          0.4.5

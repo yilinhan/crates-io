@@ -2,6 +2,10 @@ aho-corasick                  0.7.10
 ansi_term                     0.11.0
 anyhow                        1.0.27
 arc-swap                      0.4.5
+askama                        0.8.0
+askama_derive                 0.8.0
+askama_escape                 0.2.0
+askama_shared                 0.8.0
 atty                          0.2.14
 autocfg                       1.0.0
 backtrace                     0.3.45
@@ -74,6 +78,7 @@ hex                           0.4.2
 http                          0.2.0
 http-body                     0.3.1
 httparse                      1.3.4
+humansize                     1.1.0
 humantime                     1.3.0
 hyper                         0.10.16
 hyper                         0.13.3
@@ -110,6 +115,7 @@ native-tls                    0.2.4
 net2                          0.2.33
 nix                           0.13.1
 nix                           0.17.0
+nom                           4.2.3
 num-bigint                    0.2.6
 num-integer                   0.1.42
 num-traits                    0.2.11

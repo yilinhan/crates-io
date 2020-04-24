@@ -2,6 +2,10 @@ aho-corasick: Unlicense/MIT
 ansi_term: MIT
 anyhow: MIT OR Apache-2.0
 arc-swap: Apache-2.0/MIT
+askama_derive: MIT/Apache-2.0
+askama_escape: MIT OR Apache-2.0
+askama: MIT OR Apache-2.0
+askama_shared: MIT/Apache-2.0
 atty: MIT
 autocfg: Apache-2.0 OR MIT
 backtrace: MIT/Apache-2.0
@@ -78,6 +82,7 @@ hex: MIT OR Apache-2.0
 httparse: MIT/Apache-2.0
 http-body: MIT
 http: MIT/Apache-2.0
+humansize: MIT/Apache-2.0
 humantime: MIT/Apache-2.0
 hyper-0.10.16: MIT
 hyper: MIT
@@ -114,6 +119,7 @@ native-tls: MIT/Apache-2.0
 net2: MIT/Apache-2.0
 nix-0.13.1: MIT
 nix: MIT
+nom: MIT
 num-bigint: MIT/Apache-2.0
 num_cpus: MIT/Apache-2.0
 num-integer: MIT/Apache-2.0

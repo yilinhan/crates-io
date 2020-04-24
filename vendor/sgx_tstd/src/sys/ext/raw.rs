@@ -15,41 +15,12 @@
 // specific language governing permissions and limitations
 // under the License..
 
-#![allow(dead_code)] // not used on all platforms
+//! Unix-specific primitives available on all unix platforms
 
-use core::mem;
+pub type uid_t = u32;
+pub type gid_t = u32;
+pub type pid_t = i32;
 
-pub type Key = libc::pthread_key_t;
-
-#[inline]
-pub unsafe fn create(dtor: Option<unsafe extern "C" fn(*mut u8)>) -> Key {
-    let mut key = 0;
-    assert_eq!(libc::pthread_key_create(&mut key, mem::transmute(dtor)), 0);
-    key
-}
-
-#[inline]
-pub unsafe fn set(key: Key, value: *mut u8) {
-    let r = libc::pthread_setspecific(key, value as *mut _);
-    debug_assert_eq!(r, 0);
-}
-
-#[inline]
-pub unsafe fn get(key: Key) -> *mut u8 {
-    libc::pthread_getspecific(key) as *mut u8
-}
-
-#[inline]
-pub unsafe fn destroy(key: Key) {
-    let r = libc::pthread_key_delete(key);
-    debug_assert_eq!(r, 0);
-}
-
-#[inline]
-pub fn requires_synchronized_create() -> bool {
-    false
-}
-
-mod libc {
-    pub use sgx_trts::libc::*;
-}
+pub use crate::os::raw::pthread_t;
+pub use crate::os::raw::{blkcnt_t, time_t};
+pub use crate::os::raw::{blksize_t, dev_t, ino_t, mode_t, nlink_t, off_t};

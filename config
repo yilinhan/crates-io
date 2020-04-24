@@ -13,7 +13,7 @@ replace-with = "vendored-sources"
 
 [source."https://github.com/apache/teaclave-sgx-sdk"]
 git = "https://github.com/apache/teaclave-sgx-sdk"
-rev = "v1.1.1"
+rev = "v1.1.2"
 replace-with = "vendored-sources"
 
 [source."https://github.com/mesalock-linux/sgx-fake-profiler-builtins"]

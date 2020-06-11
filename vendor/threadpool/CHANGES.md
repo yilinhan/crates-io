@@ -1,10 +1,13 @@
 # Changes
 
-## 1.7.0
+## 1.8.1
 
-* [Introduce `threadpool::Builder`](https://github.com/rust-threadpool/rust-threadpool/pull/83)
-* [Add more hyperlinks to documentation](https://github.com/rust-threadpool/rust-threadpool/pull/87)
-* [Add keywords and categories to Cargo.toml](https://github.com/rust-threadpool/rust-threadpool/pull/88)
+* [Fix a typo](https://github.com/rust-threadpool/rust-threadpool/pull/107)
+
+## 1.8.0
+
+* [Raise minimal rustc version to 1.13.0](https://github.com/rust-threadpool/rust-threadpool/pull/99)
+* [Update num_cpus to 1.13.0](https://github.com/rust-threadpool/rust-threadpool/pull/105)
 
 ## 1.7.1
 
@@ -12,7 +15,9 @@
 
 ## 1.7.0
 
-* [Initial implementation of `threadpool::Builder`](https://github.com/rust-threadpool/rust-threadpool/pull/83)
+* [Introduce `threadpool::Builder`](https://github.com/rust-threadpool/rust-threadpool/pull/83)
+* [Add more hyperlinks to documentation](https://github.com/rust-threadpool/rust-threadpool/pull/87)
+* [Add keywords and categories to Cargo.toml](https://github.com/rust-threadpool/rust-threadpool/pull/88)
 
 ## 1.6.0
 

@@ -278,7 +278,7 @@ wasm-bindgen-macro: MIT/Apache-2.0
 wasm-bindgen-macro-support: MIT/Apache-2.0
 wasm-bindgen: MIT/Apache-2.0
 wasm-bindgen-shared: MIT/Apache-2.0
-webpki-roots-0.17.0: MPL-2.0
+webpki-roots-0.18.0: MPL-2.0
 webpki-roots: MPL-2.0
 webpki: see license file at webpki/LICENSE
 web-sys: MIT/Apache-2.0

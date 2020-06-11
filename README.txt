@@ -119,7 +119,7 @@ nom                           4.2.3
 num-bigint                    0.2.6
 num-integer                   0.1.42
 num-traits                    0.2.11
-num_cpus                      1.12.0
+num_cpus                      1.13.0
 openssl                       0.10.28
 openssl-probe                 0.1.2
 openssl-sys                   0.9.54
@@ -211,7 +211,7 @@ textwrap                      0.11.0
 thiserror                     1.0.11
 thiserror-impl                1.0.11
 thread_local                  1.0.1
-threadpool                    1.7.1
+threadpool                    1.8.1
 time                          0.1.42
 time                          0.2.9
 time-macros                   0.1.0
@@ -256,8 +256,8 @@ wasm-bindgen-macro-support    0.2.59
 wasm-bindgen-shared           0.2.59
 web-sys                       0.3.36
 webpki                        0.21.2
-webpki-roots                  0.17.0
 webpki-roots                  0.18.0
+webpki-roots                  0.19.0
 which                         3.1.1
 winapi                        0.2.8
 winapi                        0.3.8

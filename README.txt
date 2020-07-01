@@ -157,6 +157,7 @@ rand_core                     0.3.1
 rand_core                     0.4.2
 rand_core                     0.5.1
 rand_hc                       0.2.0
+raw-cpuid                     8.1.0
 rayon                         1.3.0
 rayon-core                    1.7.0
 rdrand                        0.6.0

@@ -25,6 +25,7 @@ log                  = "0.4.6"
 nan-preserving-float = "0.1.0"
 net2                 = "0.2.33"
 num-bigint           = "0.2.2"
+pem                  = "0.7.0"
 percent-encoding     = "2.1.0"
 prost                = "0.6.0"
 prost-build          = "0.6.0"
@@ -33,6 +34,7 @@ prost-types          = "0.6.0"
 quicli               = "0.4.0"
 rand                 = "0.7.0"
 rand_core            = "0.4"
+raw-cpuid            = "8.1.0"
 rdrand               = "0.6"
 rustls               = "0.16.0"
 serde                = "1.0.92"
@@ -49,7 +51,6 @@ wabt                 = "0.4.0"
 webpki               = "0.21.0"
 webpki-roots         = "0.19.0"
 yasna                = "0.3.0"
-pem = "0.7.0"
 
 tokio           = "0.2"
 tokio-util      = "0.3"
@@ -67,3 +68,5 @@ sgx_tse              = { git = "https://github.com/apache/teaclave-sgx-sdk", rev
 sgx_tstd             = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.2" }
 sgx_trts             = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.2" }
 sgx_urts             = { git = "https://github.com/apache/teaclave-sgx-sdk", rev = "v1.1.2" }
+
+[workspace]

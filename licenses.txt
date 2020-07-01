@@ -162,6 +162,7 @@ rand_core-0.4.2: MIT/Apache-2.0
 rand_core: MIT OR Apache-2.0
 rand_hc: MIT/Apache-2.0
 rand: MIT OR Apache-2.0
+raw-cpuid: MIT
 rayon: Apache-2.0/MIT
 rayon-core: Apache-2.0/MIT
 rdrand: ISC

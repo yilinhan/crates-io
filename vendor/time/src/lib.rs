@@ -1,88 +1,43 @@
-//! Simple time handling.
+//! [![GitHub time-rs/time](https://img.shields.io/badge/GitHub-time--rs%2Ftime-9b88bb?logo=github&style=for-the-badge)](https://github.com/time-rs/time)
+//! ![license MIT or Apache-2.0](https://img.shields.io/badge/license-MIT%20or%20Apache--2.0-779a6b?style=for-the-badge)
+//! [![minimum rustc 1.32.0](https://img.shields.io/badge/minimum%20rustc-1.32.0-c18170?logo=rust&style=for-the-badge)](https://www.whatrustisit.com)
 //!
-//! ![rustc 1.34.0](https://img.shields.io/badge/rustc-1.34.0-blue)
+//! # Feature flags
 //!
-//! # Feature flags in Cargo
+//! This crate exposes a number of features. These can be enabled or disabled as
+//! shown [in Cargo's documentation](https://doc.rust-lang.org/cargo/reference/features.html).
+//! Features are _disabled_ by default unless otherwise noted.
 //!
-//! ## `std`
+//! Reliance on a given feature is always indicated alongside the item
+//! definition.
 //!
-//! Currently, all structs except `Instant` can be used with `#![no_std]`. As
-//! support for the standard library is enabled by default, you must use
-//! `default_features = false` in your `Cargo.toml` to enable this.
+//! - `std` (_enabled by default_)
 //!
-//! ```toml
-//! [dependencies]
-//! time = { version = "0.2", default-features = false }
-//! ```
+//!   This enables a number of features that depend on the standard library.
+//!   [`Instant`] is the primary item that requires this feature, though some
+//!   others methods may rely on [`Instant`] internally.
 //!
-//! Of the structs that are usable, some methods may only be enabled due a
-//! reliance on `Instant`. These will be indicated in the documentation.
+//!   This crate currently requires a global allocator be present even if this
+//!   feature is disabled.
 //!
-//! ## `serde`
+//! - `serde`
 //!
-//! [Serde](https://github.com/serde-rs/serde) support is behind a feature flag.
-//! To enable it, use the `serde` feature. This is not enabled by default. It
-//! _is_ compatible with `#![no_std]`, so long as an allocator is present.
+//!   Enables [serde](https://docs.rs/serde) support for all types.
 //!
-//! With the standard library:
-//! ```toml
-//! [dependencies]
-//! time = { version = "0.2", features = ["serde"] }
-//! ```
+//! - `rand`
 //!
-//! With `#![no_std]` support:
-//! ```toml
-//! [dependencies]
-//! time = { version = "0.2", default-features = false, features = ["serde"] }
-//! ```
+//!   Enables [rand](https://docs.rs/rand) support for all types.
 //!
-//! ## `rand`
+//! - `deprecated` (_enabled by default_)
 //!
-//! [Rand](https://github.com/rust-random/rand) support is behind a feature
-//! flag. To enable it, use the `rand` feature. This is not enabled by default.
-//! Usage is compatible with `#![no_std]`.
+//!   Allows using certain deprecated functions from time 0.1.
 //!
-//! With the standard library:
-//! ```toml
-//! [dependencies]
-//! time = { version = "0.2", features = ["rand"] }
-//! ```
+//! - `panicking-api`
 //!
-//! With `#![no_std]` support:
-//! ```toml
-//! [dependencies]
-//! time = { version = "0.2", default-features = false, features = ["rand"] }
-//! ```
-//!
-//! ## `deprecated`
-//!
-//! Using the `deprecated` feature allows using deprecated v0.1 methods. Enabled
-//! by default.
-//!
-//! With the standard library, the normal `time = 0.2` will work as expected.
-//!
-//! With `#![no_std]` support:
-//! ```toml
-//! [dependencies]
-//! time = { version = "0.2", default-features = false, features = ["deprecated"] }
-//! ```
-//!
-//! ## `panicking-api`
-//!
-//! Non-panicking APIs are provided, and should generally be preferred. However,
-//! there are some situations where avoiding `.unwrap()` may be desired. To
-//! enable these APIs, you need to use the `panicking-api` feature in your
-//! `Cargo.toml`, which is not enabled by default.
-//!
-//! Library authors should avoid using this feature.
-//!
-//! This feature will be removed in a future release, as there are provided
-//! macros to perform the equivalent calculations at compile-time.
-//!
-//! ```toml
-//! [dependencies]
-//! time = { version = "0.2", features = ["panicking-api"] }
-//! ```
+//!   Non-panicking APIs are provided, and should generally be preferred.
+//!   However, there are some situations where avoiding `.unwrap()` may be
+//!   desired. Generally speaking, macros should be used in these situations.
+//!   Library authors should avoid using this feature.
 //!
 //! # Formatting
 //!
@@ -90,6 +45,16 @@
 //! explicitly _not_ compatible. Specifiers may be missing, added, or have
 //! different behavior than in C. As such, you should use the table below, which
 //! is an up-to-date reference on what each specifier does.
+//!
+//! <style>
+//! summary, details:not([open]) { cursor: pointer; }
+//! summary { display: list-item; }
+//! summary::marker { content: '▶ '; }
+//! details[open] summary::marker { content: '▼ '; }
+//! </style>
+//!
+//! <details>
+//! <summary>Specifiers</summary>
 //!
 //! | Specifier | Replaced by                                                            | Example                    |
 //! |-----------|------------------------------------------------------------------------|----------------------------|
@@ -126,6 +91,8 @@
 //! | `%z`      | ISO 8601 offset from UTC in timezone (+HHMM)                           | `+0100`                    |
 //! | `%%`      | Literal `%`                                                            | `%`                        |
 //!
+//! </details>
+//!
 //! ## Modifiers
 //!
 //! All specifiers that are strictly numerical have modifiers for formatting.
@@ -140,87 +107,90 @@
 //! | `_` (underscore) | Pad with spaces | `%_d` => ` 5` |
 //! | `0`              | Pad with zeros  | `%0d` => `05` |
 
-#![cfg_attr(docs, feature(doc_cfg))]
-#![cfg_attr(no_std, no_std)]
+#![cfg_attr(__time_02_docs, feature(doc_cfg))]
+#![cfg_attr(not(feature = "std"), no_std)]
 #![deny(
-    unsafe_code, // Used when interacting with system APIs
     anonymous_parameters,
-    rust_2018_idioms,
-    trivial_casts,
-    trivial_numeric_casts,
-    unreachable_pub, // some known bugs that are overridden
+    clippy::all,
     const_err,
     illegal_floating_point_literal_pattern,
     late_bound_lifetime_arguments,
     path_statements,
     patterns_in_fns_without_body,
-    clippy::all
+    rust_2018_idioms,
+    trivial_casts,
+    trivial_numeric_casts,
+    unreachable_pub,
+    unsafe_code,
+    unused_extern_crates
 )]
 #![warn(
-    unused_extern_crates,
+    clippy::dbg_macro,
+    clippy::decimal_literal_representation,
+    clippy::get_unwrap,
+    clippy::missing_docs_in_private_items,
+    clippy::nursery,
+    clippy::pedantic,
+    clippy::print_stdout,
+    clippy::todo,
+    clippy::unimplemented,
+    clippy::unwrap_used,
+    clippy::use_debug,
     missing_copy_implementations,
     missing_debug_implementations,
     single_use_lifetimes,
     unused_qualifications,
-    variant_size_differences,
-    clippy::pedantic,
-    clippy::nursery,
-    clippy::missing_docs_in_private_items,
-    clippy::dbg_macro,
-    clippy::decimal_literal_representation,
-    clippy::get_unwrap,
-    clippy::option_unwrap_used,
-    clippy::print_stdout,
-    clippy::result_unwrap_used
+    variant_size_differences
 )]
 #![allow(
-    unstable_name_collisions,
-    clippy::suspicious_arithmetic_impl,
-    clippy::inline_always,
-    clippy::cast_possible_wrap,
     clippy::cast_lossless,
+    clippy::cast_possible_truncation,
+    clippy::cast_possible_wrap,
+    clippy::cast_precision_loss,
+    clippy::cast_sign_loss,
+    clippy::enum_glob_use,
+    clippy::inline_always,
+    clippy::map_err_ignore,
+    clippy::missing_errors_doc,
     clippy::module_name_repetitions,
     clippy::must_use_candidate,
-    clippy::missing_errors_doc,
-    clippy::use_self, // Not supported in some situations in older compilers.
+    clippy::redundant_pub_crate,
+    clippy::suspicious_arithmetic_impl,
+    clippy::suspicious_op_assign_impl,
+    clippy::use_self,
+    clippy::wildcard_imports,
+    clippy::zero_prefixed_literal,
+    unstable_name_collisions
 )]
-#![cfg_attr(test, allow(clippy::cognitive_complexity, clippy::too_many_lines))]
+#![cfg_attr(
+    test,
+    allow(
+        clippy::cognitive_complexity,
+        clippy::similar_names,
+        clippy::too_many_lines,
+    )
+)]
 #![doc(html_favicon_url = "https://avatars0.githubusercontent.com/u/55999857")]
 #![doc(html_logo_url = "https://avatars0.githubusercontent.com/u/55999857")]
-// Because we have a macro named `time`, this can cause conflicts. MSRV
-// guarantees that edition 2018 is available.
-#![doc(test(no_crate_inject))]
+#![doc(test(attr(deny(warnings))))]
 
-// This is necessary to allow our proc macros to work.
-// See rust-lang/rust#54647 for details.
-// Unfortunately, this also means we can't have a `time` mod.
-extern crate self as time;
+#[cfg(not(feature = "std"))]
+extern crate alloc;
 
-#[cfg(docs)]
-#[rustversion::not(nightly)]
-compile_error!("The `__doc` feature requires a nightly compiler, and is for internal usage only.");
-
-#[rustversion::before(1.34.0)]
-compile_error!("The time crate has a minimum supported rust version of 1.34.0.");
-
-#[cfg(no_std)]
-#[rustversion::before(1.36.0)]
-compile_error!(
-    "Using the time crate without the standard library enabled requires a global allocator. This \
-     was stabilized in Rust 1.36.0. You can either upgrade or enable the standard library."
-);
-
-#[cfg(panicking_api)]
-#[cfg_attr(docs, doc(cfg(feature = "panicking-api")))]
+#[cfg(feature = "panicking-api")]
+#[cfg_attr(__time_02_docs, doc(cfg(feature = "panicking-api")))]
 macro_rules! format_conditional {
-    ($conditional:ident) => {
+    ($conditional:ident) => {{
+        #[cfg(not(feature = "std"))]
+        use alloc::format;
+
         format!(concat!(stringify!($conditional), "={}"), $conditional)
-    };
+    }};
 
     ($first_conditional:ident, $($conditional:ident),*) => {{
-        #[cfg(no_std)]
-        let mut s = alloc::string::String::new();
-        #[cfg(std)]
+        #[cfg(not(feature = "std"))]
+        use alloc::{format, string::String};
+
         let mut s = String::new();
         s.push_str(&format_conditional!($first_conditional));
         $(s.push_str(&format!(concat!(", ", stringify!($conditional), "={}"), $conditional));)*
@@ -229,86 +199,89 @@ macro_rules! format_conditional {
 }
 
 /// Panic if the value is not in range.
-#[cfg(panicking_api)]
-#[cfg_attr(docs, doc(cfg(feature = "panicking-api")))]
+#[cfg(feature = "panicking-api")]
+#[cfg_attr(__time_02_docs, doc(cfg(feature = "panicking-api")))]
 macro_rules! assert_value_in_range {
-    ($value:ident in $start:expr => $end:expr) => {
-        #[allow(unused_comparisons)]
-        {
-            if $value < $start || $value > $end {
-                panic!(
-                    concat!(stringify!($value), " must be in the range {}..={} (was {})"),
-                    $start,
-                    $end,
-                    $value,
-                );
-            }
-        }
-    };
+    ($value:ident in $start:expr => $end:expr) => {{
+        #[allow(unused_imports)]
+        use standback::prelude::*;
 
-    ($value:ident in $start:expr => $end:expr, given $($conditional:ident),+ $(,)?) => {
-        #[allow(unused_comparisons)]
-        {
-            if $value < $start || $value > $end {
-                panic!(
-                    concat!(stringify!($value), " must be in the range {}..={} given{} (was {})"),
-                    $start,
-                    $end,
-                    &format_conditional!($($conditional),+),
-                    $value,
-                );
-            };
+        if !($start..=$end).contains(&$value) {
+            panic!(
+                concat!(stringify!($value), " must be in the range {}..={} (was {})"),
+                $start,
+                $end,
+                $value,
+            );
         }
-    };
+    }};
+
+    ($value:ident in $start:expr => $end:expr, given $($conditional:ident),+ $(,)?) => {{
+        #[allow(unused_imports)]
+        use standback::prelude::*;
+
+        if !($start..=$end).contains(&$value) {
+            panic!(
+                concat!(stringify!($value), " must be in the range {}..={} given{} (was {})"),
+                $start,
+                $end,
+                &format_conditional!($($conditional),+),
+                $value,
+            );
+        }
+    }};
 }
 
-// TODO Some of the formatting can likely be performed at compile-time.
-/// Returns `None` if the value is not in range.
+/// Returns `Err(error::ComponentRange)` if the value is not in range.
 macro_rules! ensure_value_in_range {
-    ($value:ident in $start:expr => $end:expr) => {
-        #[allow(unused_comparisons)]
-        {
-            if $value < $start || $value > $end {
-                return Err(ComponentRangeError {
-                    name: stringify!($value),
-                    minimum: i64::from($start),
-                    maximum: i64::from($end),
-                    value: i64::from($value),
-                    given: Vec::new(),
-                });
-            }
+    ($value:ident in $start:expr => $end:expr) => {{
+        #![allow(
+            trivial_numeric_casts,
+            unused_comparisons,
+            clippy::manual_range_contains
+        )]
+        if $value < $start || $value > $end {
+            return Err(crate::error::ComponentRange {
+                name: stringify!($value),
+                minimum: $start as i64,
+                maximum: $end as i64,
+                value: $value as i64,
+                conditional_range: false,
+                #[cfg(not(__time_02_supports_non_exhaustive))]
+                __non_exhaustive: (),
+            });
         }
-    };
+    }};
 
-    ($value:ident in $start:expr => $end:expr, given $($conditional:ident),+ $(,)?) => {
-        #[allow(unused_comparisons)]
-        {
-            if $value < $start || $value > $end {
-                return Err(ComponentRangeError {
-                    name: stringify!($value),
-                    minimum: i64::from($start),
-                    maximum: i64::from($end),
-                    value: i64::from($value),
-                    given: vec![$((stringify!($conditional), i64::from($conditional))),+],
-                });
-            };
+    ($value:ident conditionally in $start:expr => $end:expr) => {{
+        #![allow(
+            trivial_numeric_casts,
+            unused_comparisons,
+            clippy::manual_range_contains
+        )]
+        if $value < $start || $value > $end {
+            return Err(crate::error::ComponentRange {
+                name: stringify!($value),
+                minimum: $start as i64,
+                maximum: $end as i64,
+                value: $value as i64,
+                conditional_range: true,
+                #[cfg(not(__time_02_supports_non_exhaustive))]
+                __non_exhaustive: (),
+            });
         }
-    };
+    }};
 }
 
-#[cfg(all(test, std))]
-macro_rules! assert_panics {
-    ($e:expr $(, $message:literal)?) => {
-        #[allow(box_pointers)]
-        {
-            if std::panic::catch_unwind(move || $e).is_ok() {
-                panic!(concat!(
-                    "assertion failed: expected `",
-                    stringify!($e),
-                    "` to panic",
-                    $(concat!(" (", $message, ")"))?
-                ));
-            }
+/// Try to unwrap an expression, returning if not possible.
+///
+/// This is similar to the `?` operator, but does not perform `.into()`. Because
+/// of this, it is usable in `const` contexts.
+macro_rules! const_try {
+    ($e:expr) => {
+        match $e {
+            Ok(value) => value,
+            Err(error) => return Err(error),
         }
     };
 }
@@ -318,113 +291,72 @@ mod date;
 /// The `Duration` struct and its associated `impl`s.
 mod duration;
 /// Various error types returned by methods in the time crate.
-mod error;
+pub mod error;
+/// Extension traits.
+pub mod ext;
 mod format;
 /// The `Instant` struct and its associated `impl`s.
-#[cfg(std)]
+#[cfg(feature = "std")]
 mod instant;
 pub mod internals;
-/// A collection of traits extending built-in numerical types.
-mod numerical_traits;
 /// The `OffsetDateTime` struct and its associated `impl`s.
 mod offset_date_time;
 /// The `PrimitiveDateTime` struct and its associated `impl`s.
 mod primitive_date_time;
-#[cfg(rand)]
+#[cfg(feature = "rand")]
 mod rand;
-#[cfg(serde)]
+#[cfg(feature = "serde")]
 #[allow(missing_copy_implementations, missing_debug_implementations)]
-mod serde;
+pub mod serde;
 /// The `Sign` struct and its associated `impl`s.
 mod sign;
 /// The `Time` struct and its associated `impl`s.
 mod time_mod;
 /// The `UtcOffset` struct and its associated `impl`s.
 mod utc_offset;
+pub mod util;
 /// Days of the week.
 mod weekday;
 
-pub use date::{days_in_year, is_leap_year, weeks_in_year, Date};
+pub use date::Date;
 pub use duration::Duration;
-pub use error::{ComponentRangeError, ConversionRangeError, Error, IndeterminateOffsetError};
+pub use error::Error;
+#[deprecated(
+    since = "0.2.23",
+    note = "Errors have been moved to the `error` module."
+)]
+pub use error::{
+    ComponentRange as ComponentRangeError, ConversionRange as ConversionRangeError,
+    IndeterminateOffset as IndeterminateOffsetError, Parse as ParseError,
+};
+#[deprecated(
+    since = "0.2.23",
+    note = "Extension traits have been moved to the `ext` module."
+)]
+pub use ext::{NumericalDuration, NumericalStdDuration, NumericalStdDurationShort};
 pub(crate) use format::DeferredFormat;
+pub use format::Format;
 use format::ParseResult;
-pub use format::{validate_format_string, ParseError};
-#[cfg(std)]
+#[cfg(feature = "std")]
 pub use instant::Instant;
-pub use numerical_traits::{NumericalDuration, NumericalStdDuration, NumericalStdDurationShort};
+#[deprecated(
+    since = "0.2.23",
+    note = "Macros have been moved to the `macros` module."
+)]
+pub use macros::{date, offset, time};
 pub use offset_date_time::OffsetDateTime;
 pub use primitive_date_time::PrimitiveDateTime;
 #[allow(deprecated)]
 pub use sign::Sign;
-/// Construct a [`Date`] with a statically known value.
-///
-/// The resulting expression can be used in `const` or `static` declarations.
-///
-/// Three formats are supported: year-week-weekday, year-ordinal, and
-/// year-month-day.
-///
-/// ```rust
-/// # use time::{Date, date, Weekday::*};
-/// # fn main() -> time::Result<()> {
-/// assert_eq!(date!(2020-W01-3), Date::try_from_iso_ywd(2020, 1, Wednesday)?);
-/// assert_eq!(date!(2020-001), Date::try_from_yo(2020, 1)?);
-/// assert_eq!(date!(2020-01-01), Date::try_from_ymd(2020, 1, 1)?);
-/// # Ok(())
-/// # }
-/// ```
-pub use time_macros::date;
-/// Construct a [`UtcOffset`] with a statically known value.
-///
-/// The resulting expression can be used in `const` or `static` declarations.
-///
-/// A sign and the hour must be provided; minutes and seconds default to zero.
-/// `UTC` (both uppercase and lowercase) is also allowed.
-///
-/// ```rust
-/// # use time::{offset, UtcOffset};
-/// assert_eq!(offset!(UTC), UtcOffset::hours(0));
-/// assert_eq!(offset!(utc), UtcOffset::hours(0));
-/// assert_eq!(offset!(+0), UtcOffset::hours(0));
-/// assert_eq!(offset!(+1), UtcOffset::hours(1));
-/// assert_eq!(offset!(-1), UtcOffset::hours(-1));
-/// assert_eq!(offset!(+1:30), UtcOffset::minutes(90));
-/// assert_eq!(offset!(-1:30), UtcOffset::minutes(-90));
-/// assert_eq!(offset!(+1:30:59), UtcOffset::seconds(5459));
-/// assert_eq!(offset!(-1:30:59), UtcOffset::seconds(-5459));
-/// assert_eq!(offset!(+23:59:59), UtcOffset::seconds(86_399));
-/// assert_eq!(offset!(-23:59:59), UtcOffset::seconds(-86_399));
-/// ```
-pub use time_macros::offset;
-/// Construct a [`Time`] with a statically known value.
-///
-/// The resulting expression can be used in `const` or `static` declarations.
-///
-/// Hours and minutes must be provided, while seconds defaults to zero. AM/PM is
-/// allowed (either uppercase or lowercase). Any number of subsecond digits may
-/// be provided (though any past nine will be discarded).
-///
-/// All components are validated at compile-time. An error will be raised if any
-/// value is invalid.
-///
-/// ```rust
-/// # use time::{Time, time};
-/// # fn main() -> time::Result<()> {
-/// assert_eq!(time!(0:00), Time::try_from_hms(0, 0, 0)?);
-/// assert_eq!(time!(1:02:03), Time::try_from_hms(1, 2, 3)?);
-/// assert_eq!(time!(1:02:03.004_005_006), Time::try_from_hms_nano(1, 2, 3, 4_005_006)?);
-/// assert_eq!(time!(12:00 am), Time::try_from_hms(0, 0, 0)?);
-/// assert_eq!(time!(1:02:03 am), Time::try_from_hms(1, 2, 3)?);
-/// assert_eq!(time!(1:02:03.004_005_006 am), Time::try_from_hms_nano(1, 2, 3, 4_005_006)?);
-/// assert_eq!(time!(12:00 pm), Time::try_from_hms(12, 0, 0)?);
-/// assert_eq!(time!(1:02:03 pm), Time::try_from_hms(13, 2, 3)?);
-/// assert_eq!(time!(1:02:03.004_005_006 pm), Time::try_from_hms_nano(13, 2, 3, 4_005_006)?);
-/// # Ok(())
-/// # }
-/// ```
-pub use time_macros::time;
+#[allow(unused_imports)]
+use standback::prelude::*;
 pub use time_mod::Time;
 pub use utc_offset::UtcOffset;
+#[deprecated(
+    since = "0.2.23",
+    note = "This function has been moved to the `util` module."
+)]
+pub use util::{days_in_year, is_leap_year, validate_format_string, weeks_in_year};
 pub use weekday::Weekday;
 
 /// An alias for `Result` with a generic error from the time crate.
@@ -435,14 +367,18 @@ pub type Result<T> = core::result::Result<T, Error>;
 /// Unlike the standard library, this must be explicitly imported:
 ///
 /// ```rust,no_run
+/// # #[allow(unused_imports)]
 /// use time::prelude::*;
 /// ```
 ///
 /// The prelude may grow in minor releases. Any removals will only occur in
 /// major releases.
 pub mod prelude {
-    // Rename traits to `_` to avoid any potential name conflicts.
-    pub use crate::{NumericalDuration as _, NumericalStdDuration as _};
+    // Rename traits to `_` if possible to avoid any potential name conflicts.
+    #[cfg(not(__time_02_use_trait_as_underscore))]
+    pub use crate::ext::{NumericalDuration, NumericalStdDuration};
+    #[cfg(__time_02_use_trait_as_underscore)]
+    pub use crate::ext::{NumericalDuration as _, NumericalStdDuration as _};
     // We need to re-export from the macros crate again (and not just do
     // `crate::foo`) because of the way name resolution works in Rust. It's not
     // currently possible to import _only_ the macro, so doing `use crate::time`
@@ -451,35 +387,6 @@ pub mod prelude {
     // As a side note, doing `use crate::time` causes a stack overflow in
     // rustc <= 1.37.0.
     pub use time_macros::{date, offset, time};
-}
-
-/// Items generally useful in any file in the time crate.
-mod internal_prelude {
-    #![allow(unused_imports)]
-
-    #[cfg(no_std)]
-    extern crate alloc;
-
-    #[cfg(std)]
-    pub(crate) use crate::Instant;
-    pub(crate) use crate::{
-        format::{ParseError, ParseResult},
-        ComponentRangeError, ConversionRangeError, Date, DeferredFormat, Duration,
-        IndeterminateOffsetError, NumericalDuration, NumericalStdDuration, OffsetDateTime,
-        PrimitiveDateTime, Time, UtcOffset,
-        Weekday::{self, Friday, Monday, Saturday, Sunday, Thursday, Tuesday, Wednesday},
-    };
-    #[cfg(no_std)]
-    pub(crate) use alloc::{
-        borrow::ToOwned,
-        boxed::Box,
-        format,
-        string::{String, ToString},
-        vec,
-        vec::Vec,
-    };
-    pub(crate) use standback::prelude::*;
-    pub(crate) use time_macros::{date, offset, time};
 }
 
 #[allow(clippy::missing_docs_in_private_items)]
@@ -510,7 +417,7 @@ mod private {
 /// This is identical to calling `T::parse(s, format)`, but allows the use of
 /// type inference where possible.
 ///
-/// ```rust,no_run
+/// ```rust
 /// use time::Time;
 ///
 /// #[derive(Debug)]
@@ -523,37 +430,103 @@ mod private {
 ///     Ok(())
 /// }
 /// ```
-#[inline(always)]
 pub fn parse<T: private::Parsable>(s: impl AsRef<str>, format: impl AsRef<str>) -> ParseResult<T> {
     private::Parsable::parse(s, format)
+}
+
+/// Macros to statically construct values that are known to be valid.
+pub mod macros {
+
+    /// Construct a [`Date`](crate::Date) with a statically known value.
+    ///
+    /// The resulting expression can be used in `const` or `static` declarations.
+    ///
+    /// Three formats are supported: year-week-weekday, year-ordinal, and
+    /// year-month-day.
+    ///
+    /// ```rust
+    /// # use time::{Date, macros::date, Weekday::*};
+    /// # fn main() -> time::Result<()> {
+    /// assert_eq!(date!(2020-W01-3), Date::try_from_iso_ywd(2020, 1, Wednesday)?);
+    /// assert_eq!(date!(2020-001), Date::try_from_yo(2020, 1)?);
+    /// assert_eq!(date!(2020-01-01), Date::try_from_ymd(2020, 1, 1)?);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub use time_macros::date;
+    /// Construct a [`UtcOffset`](crate::UtcOffset) with a statically known value.
+    ///
+    /// The resulting expression can be used in `const` or `static` declarations.
+    ///
+    /// A sign and the hour must be provided; minutes and seconds default to zero.
+    /// `UTC` (both uppercase and lowercase) is also allowed.
+    ///
+    /// ```rust
+    /// # use time::{macros::offset, UtcOffset};
+    /// assert_eq!(offset!(UTC), UtcOffset::hours(0));
+    /// assert_eq!(offset!(utc), UtcOffset::hours(0));
+    /// assert_eq!(offset!(+0), UtcOffset::hours(0));
+    /// assert_eq!(offset!(+1), UtcOffset::hours(1));
+    /// assert_eq!(offset!(-1), UtcOffset::hours(-1));
+    /// assert_eq!(offset!(+1:30), UtcOffset::minutes(90));
+    /// assert_eq!(offset!(-1:30), UtcOffset::minutes(-90));
+    /// assert_eq!(offset!(+1:30:59), UtcOffset::seconds(5459));
+    /// assert_eq!(offset!(-1:30:59), UtcOffset::seconds(-5459));
+    /// assert_eq!(offset!(+23:59:59), UtcOffset::seconds(86_399));
+    /// assert_eq!(offset!(-23:59:59), UtcOffset::seconds(-86_399));
+    /// ```
+    pub use time_macros::offset;
+    /// Construct a [`Time`](crate::Time) with a statically known value.
+    ///
+    /// The resulting expression can be used in `const` or `static` declarations.
+    ///
+    /// Hours and minutes must be provided, while seconds defaults to zero. AM/PM is
+    /// allowed (either uppercase or lowercase). Any number of subsecond digits may
+    /// be provided (though any past nine will be discarded).
+    ///
+    /// All components are validated at compile-time. An error will be raised if any
+    /// value is invalid.
+    ///
+    /// ```rust
+    /// # use time::{Time, macros::time};
+    /// # fn main() -> time::Result<()> {
+    /// assert_eq!(time!(0:00), Time::try_from_hms(0, 0, 0)?);
+    /// assert_eq!(time!(1:02:03), Time::try_from_hms(1, 2, 3)?);
+    /// assert_eq!(time!(1:02:03.004_005_006), Time::try_from_hms_nano(1, 2, 3, 4_005_006)?);
+    /// assert_eq!(time!(12:00 am), Time::try_from_hms(0, 0, 0)?);
+    /// assert_eq!(time!(1:02:03 am), Time::try_from_hms(1, 2, 3)?);
+    /// assert_eq!(time!(1:02:03.004_005_006 am), Time::try_from_hms_nano(1, 2, 3, 4_005_006)?);
+    /// assert_eq!(time!(12:00 pm), Time::try_from_hms(12, 0, 0)?);
+    /// assert_eq!(time!(1:02:03 pm), Time::try_from_hms(13, 2, 3)?);
+    /// assert_eq!(time!(1:02:03.004_005_006 pm), Time::try_from_hms_nano(13, 2, 3, 4_005_006)?);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub use time_macros::time;
 }
 
 // For some back-compatibility, we're also implementing some deprecated types
 // and methods. They will be removed completely in 0.3.
 
-#[cfg(all(std, v01_deprecated))]
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(all(feature = "std", feature = "deprecated"))]
 #[allow(clippy::missing_docs_in_private_items)]
 #[deprecated(since = "0.2.0", note = "Use `Instant`")]
 pub type PreciseTime = Instant;
 
-#[cfg(all(std, v01_deprecated))]
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(all(feature = "std", feature = "deprecated"))]
 #[allow(clippy::missing_docs_in_private_items)]
 #[deprecated(since = "0.2.0", note = "Use `Instant`")]
 pub type SteadyTime = Instant;
 
-#[cfg(all(std, v01_deprecated))]
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(all(feature = "std", feature = "deprecated"))]
 #[allow(clippy::missing_docs_in_private_items)]
 #[deprecated(
     since = "0.2.0",
     note = "Use `OffsetDateTime::now() - OffsetDateTime::unix_epoch()` to get a `Duration` since \
             a known epoch."
 )]
-#[inline]
 pub fn precise_time_ns() -> u64 {
-    use core::convert::TryInto;
+    use standback::convert::TryInto;
     use std::time::SystemTime;
 
     (SystemTime::now().duration_since(SystemTime::UNIX_EPOCH))
@@ -563,15 +536,13 @@ pub fn precise_time_ns() -> u64 {
         .expect("This function will be removed long before this is an issue.")
 }
 
-#[cfg(all(std, v01_deprecated))]
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(all(feature = "std", feature = "deprecated"))]
 #[allow(clippy::missing_docs_in_private_items)]
 #[deprecated(
     since = "0.2.0",
     note = "Use `OffsetDateTime::now() - OffsetDateTime::unix_epoch()` to get a `Duration` since \
             a known epoch."
 )]
-#[inline]
 pub fn precise_time_s() -> f64 {
     use std::time::SystemTime;
 

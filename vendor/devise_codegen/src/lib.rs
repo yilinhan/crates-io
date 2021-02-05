@@ -1,12 +1,13 @@
-#![feature(proc_macro_diagnostic, proc_macro_span)]
 #![recursion_limit="256"]
 
-extern crate proc_macro;
 #[macro_use] extern crate quote;
+extern crate proc_macro;
 extern crate devise_core;
 
 use proc_macro::TokenStream;
+
 use devise_core::*;
+use devise_core::ext::SpanDiagnosticExt;
 
 struct Naked(bool);
 
@@ -39,6 +40,9 @@ pub fn derive_from_meta(input: TokenStream) -> TokenStream {
             fn from_meta(
                 __meta: ::devise::MetaItem
             ) -> ::devise::Result<Self> {
+                #[allow(unused_imports)]
+                use ::devise::ext::SpanDiagnosticExt;
+
                 #inner
             }
         })

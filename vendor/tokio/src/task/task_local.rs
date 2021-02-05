@@ -29,8 +29,9 @@ use std::{fmt, thread};
 /// See [LocalKey documentation][`tokio::task::LocalKey`] for more
 /// information.
 ///
-/// [`tokio::task::LocalKey`]: ../tokio/task/struct.LocalKey.html
+/// [`tokio::task::LocalKey`]: struct@crate::task::LocalKey
 #[macro_export]
+#[cfg_attr(docsrs, doc(cfg(feature = "rt")))]
 macro_rules! task_local {
      // empty (base case for the recursion)
     () => {};
@@ -49,7 +50,7 @@ macro_rules! task_local {
 #[macro_export]
 macro_rules! __task_local_inner {
     ($(#[$attr:meta])* $vis:vis $name:ident, $t:ty) => {
-        static $name: $crate::task::LocalKey<$t> = {
+        $vis static $name: $crate::task::LocalKey<$t> = {
             std::thread_local! {
                 static __KEY: std::cell::RefCell<Option<$t>> = std::cell::RefCell::new(None);
             }
@@ -89,7 +90,8 @@ macro_rules! __task_local_inner {
 /// }).await;
 /// # }
 /// ```
-/// [`std::thread::LocalKey`]: https://doc.rust-lang.org/std/thread/struct.LocalKey.html
+/// [`std::thread::LocalKey`]: struct@std::thread::LocalKey
+#[cfg_attr(docsrs, doc(cfg(feature = "rt")))]
 pub struct LocalKey<T: 'static> {
     #[doc(hidden)]
     pub inner: thread::LocalKey<RefCell<Option<T>>>,
@@ -219,7 +221,7 @@ impl<T: 'static, F: Future> Future for TaskLocalFuture<T, F> {
 trait StaticLifetime: 'static {}
 impl<T: 'static> StaticLifetime for T {}
 
-/// An error returned by [`LocalKey::try_with`](struct.LocalKey.html#method.try_with).
+/// An error returned by [`LocalKey::try_with`](method@LocalKey::try_with).
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub struct AccessError {
     _private: (),

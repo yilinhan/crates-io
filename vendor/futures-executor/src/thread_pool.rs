@@ -24,6 +24,7 @@ use std::thread;
 ///
 /// This type is only available when the `thread-pool` feature of this
 /// library is activated.
+#[cfg_attr(docsrs, doc(cfg(feature = "thread-pool")))]
 pub struct ThreadPool {
     state: Arc<PoolState>,
 }
@@ -32,6 +33,7 @@ pub struct ThreadPool {
 ///
 /// This type is only available when the `thread-pool` feature of this
 /// library is activated.
+#[cfg_attr(docsrs, doc(cfg(feature = "thread-pool")))]
 pub struct ThreadPoolBuilder {
     pool_size: usize,
     stack_size: usize,
@@ -78,7 +80,7 @@ impl ThreadPool {
     /// See documentation for the methods in
     /// [`ThreadPoolBuilder`](ThreadPoolBuilder) for details on the default
     /// configuration.
-    pub fn new() -> Result<ThreadPool, io::Error> {
+    pub fn new() -> Result<Self, io::Error> {
         ThreadPoolBuilder::new().create()
     }
 
@@ -166,9 +168,9 @@ impl PoolState {
 }
 
 impl Clone for ThreadPool {
-    fn clone(&self) -> ThreadPool {
+    fn clone(&self) -> Self {
         self.state.cnt.fetch_add(1, Ordering::Relaxed);
-        ThreadPool { state: self.state.clone() }
+        Self { state: self.state.clone() }
     }
 }
 
@@ -210,7 +212,7 @@ impl ThreadPoolBuilder {
         self
     }
 
-    /// Set stack size of threads in the pool.
+    /// Set stack size of threads in the pool, in bytes.
     ///
     /// By default, worker threads use Rust's standard stack size.
     pub fn stack_size(&mut self, stack_size: usize) -> &mut Self {
@@ -311,7 +313,7 @@ impl Task {
     /// Actually run the task (invoking `poll` on the future) on the current
     /// thread.
     fn run(self) {
-        let Task { mut future, wake_handle, mut exec } = self;
+        let Self { mut future, wake_handle, mut exec } = self;
         let waker = waker_ref(&wake_handle);
         let mut cx = Context::from_waker(&waker);
 
@@ -326,7 +328,7 @@ impl Task {
                     Poll::Pending => {}
                     Poll::Ready(()) => return wake_handle.mutex.complete(),
                 }
-                let task = Task {
+                let task = Self {
                     future,
                     wake_handle: wake_handle.clone(),
                     exec,

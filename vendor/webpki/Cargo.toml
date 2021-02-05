@@ -13,9 +13,9 @@
 [package]
 edition = "2018"
 name = "webpki"
-version = "0.21.2"
+version = "0.21.4"
 authors = ["Brian Smith <brian@briansmith.org>"]
-include = ["Cargo.toml", "LICENSE", "README.md", "src/calendar.rs", "src/cert.rs", "src/der.rs", "src/name.rs", "src/error.rs", "src/signed_data.rs", "src/time.rs", "src/trust_anchor_util.rs", "src/verify_cert.rs", "src/webpki.rs", "src/data/**/*", "tests/dns_name_tests.rs", "tests/integration.rs", "tests/misc/serial_neg.der", "tests/misc/serial_zero.der", "tests/netflix/ca.der", "tests/netflix/ee.der", "tests/netflix/inter.der", "third-party/chromium/**/*"]
+include = ["Cargo.toml", "LICENSE", "README.md", "src/calendar.rs", "src/cert.rs", "src/der.rs", "src/name.rs", "src/error.rs", "src/signed_data.rs", "src/time.rs", "src/trust_anchor_util.rs", "src/verify_cert.rs", "src/webpki.rs", "src/data/**/*", "tests/dns_name_tests.rs", "tests/integration.rs", "tests/misc/serial_neg.der", "tests/misc/serial_zero.der", "tests/netflix/ca.der", "tests/netflix/ee.der", "tests/netflix/inter.der", "tests/ed25519/ca.der", "tests/ed25519/ee.der", "third-party/chromium/**/*"]
 description = "Web PKI X.509 Certificate Verification."
 documentation = "https://briansmith.org/rustdoc/webpki/"
 readme = "README.md"
@@ -42,12 +42,12 @@ rpath = false
 name = "webpki"
 path = "src/webpki.rs"
 [dependencies.ring]
-version = "0.16.10"
+version = "0.16.19"
 features = ["alloc"]
 default-features = false
 
 [dependencies.untrusted]
-version = "0.7.0"
+version = "0.7.1"
 [dev-dependencies.base64]
 version = "0.9.1"
 

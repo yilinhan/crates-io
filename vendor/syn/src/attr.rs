@@ -1,23 +1,17 @@
 use super::*;
 use crate::punctuated::Punctuated;
-
-use std::iter;
-
 use proc_macro2::TokenStream;
+use std::iter;
 
 #[cfg(feature = "parsing")]
 use crate::parse::{Parse, ParseBuffer, ParseStream, Parser, Result};
 #[cfg(feature = "parsing")]
 use crate::punctuated::Pair;
-#[cfg(feature = "extra-traits")]
-use crate::tt::TokenStreamHelper;
-#[cfg(feature = "extra-traits")]
-use std::hash::{Hash, Hasher};
 
 ast_struct! {
     /// An attribute like `#[repr(transparent)]`.
     ///
-    /// *This type is available if Syn is built with the `"derive"` or `"full"`
+    /// *This type is available only if Syn is built with the `"derive"` or `"full"`
     /// feature.*
     ///
     /// <br>
@@ -139,8 +133,10 @@ ast_struct! {
     /// let attr: ItemMod = parse_quote! {
     ///     #[doc = r" Single line doc comments"]
     ///     #[doc = r" We write so many!"]
-    ///     #[doc = r" Multi-line comments...
-    ///  May span many lines"]
+    ///     #[doc = r"
+    ///      * Multi-line comments...
+    ///      * May span many lines
+    ///      "]
     ///     mod example {
     ///         #![doc = r" Of course, they can be inner too"]
     ///         #![doc = r" And fit in a single line "]
@@ -148,7 +144,8 @@ ast_struct! {
     /// };
     /// assert_eq!(doc, attr);
     /// ```
-    pub struct Attribute #manual_extra_traits {
+    #[cfg_attr(doc_cfg, doc(cfg(any(feature = "full", feature = "derive"))))]
+    pub struct Attribute {
         pub pound_token: Token![#],
         pub style: AttrStyle,
         pub bracket_token: token::Bracket,
@@ -157,41 +154,14 @@ ast_struct! {
     }
 }
 
-#[cfg(feature = "extra-traits")]
-impl Eq for Attribute {}
-
-#[cfg(feature = "extra-traits")]
-impl PartialEq for Attribute {
-    fn eq(&self, other: &Self) -> bool {
-        self.style == other.style
-            && self.pound_token == other.pound_token
-            && self.bracket_token == other.bracket_token
-            && self.path == other.path
-            && TokenStreamHelper(&self.tokens) == TokenStreamHelper(&other.tokens)
-    }
-}
-
-#[cfg(feature = "extra-traits")]
-impl Hash for Attribute {
-    fn hash<H>(&self, state: &mut H)
-    where
-        H: Hasher,
-    {
-        self.style.hash(state);
-        self.pound_token.hash(state);
-        self.bracket_token.hash(state);
-        self.path.hash(state);
-        TokenStreamHelper(&self.tokens).hash(state);
-    }
-}
-
 impl Attribute {
     /// Parses the content of the attribute, consisting of the path and tokens,
     /// as a [`Meta`] if possible.
     ///
-    /// *This function is available if Syn is built with the `"parsing"`
+    /// *This function is available only if Syn is built with the `"parsing"`
     /// feature.*
     #[cfg(feature = "parsing")]
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "parsing")))]
     pub fn parse_meta(&self) -> Result<Meta> {
         fn clone_ident_segment(segment: &PathSegment) -> PathSegment {
             PathSegment {
@@ -236,18 +206,20 @@ impl Attribute {
     ///           ^^^^^^^^^ what gets parsed
     /// ```
     ///
-    /// *This function is available if Syn is built with the `"parsing"`
+    /// *This function is available only if Syn is built with the `"parsing"`
     /// feature.*
     #[cfg(feature = "parsing")]
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "parsing")))]
     pub fn parse_args<T: Parse>(&self) -> Result<T> {
         self.parse_args_with(T::parse)
     }
 
     /// Parse the arguments to the attribute using the given parser.
     ///
-    /// *This function is available if Syn is built with the `"parsing"`
+    /// *This function is available only if Syn is built with the `"parsing"`
     /// feature.*
     #[cfg(feature = "parsing")]
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "parsing")))]
     pub fn parse_args_with<F: Parser>(&self, parser: F) -> Result<F::Output> {
         let parser = |input: ParseStream| {
             let args = enter_args(self, input)?;
@@ -258,9 +230,10 @@ impl Attribute {
 
     /// Parses zero or more outer attributes from the stream.
     ///
-    /// *This function is available if Syn is built with the `"parsing"`
+    /// *This function is available only if Syn is built with the `"parsing"`
     /// feature.*
     #[cfg(feature = "parsing")]
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "parsing")))]
     pub fn parse_outer(input: ParseStream) -> Result<Vec<Self>> {
         let mut attrs = Vec::new();
         while input.peek(Token![#]) {
@@ -271,9 +244,10 @@ impl Attribute {
 
     /// Parses zero or more inner attributes from the stream.
     ///
-    /// *This function is available if Syn is built with the `"parsing"`
+    /// *This function is available only if Syn is built with the `"parsing"`
     /// feature.*
     #[cfg(feature = "parsing")]
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "parsing")))]
     pub fn parse_inner(input: ParseStream) -> Result<Vec<Self>> {
         let mut attrs = Vec::new();
         while input.peek(Token![#]) && input.peek2(Token![!]) {
@@ -339,7 +313,7 @@ ast_enum! {
     /// Distinguishes between attributes that decorate an item and attributes
     /// that are contained within an item.
     ///
-    /// *This type is available if Syn is built with the `"derive"` or `"full"`
+    /// *This type is available only if Syn is built with the `"derive"` or `"full"`
     /// feature.*
     ///
     /// # Outer attributes
@@ -353,7 +327,7 @@ ast_enum! {
     /// - `#![feature(proc_macro)]`
     /// - `//! # Example`
     /// - `/*! Please file an issue */`
-    #[cfg_attr(feature = "clone-impls", derive(Copy))]
+    #[cfg_attr(doc_cfg, doc(cfg(any(feature = "full", feature = "derive"))))]
     pub enum AttrStyle {
         Outer,
         Inner(Token![!]),
@@ -363,7 +337,7 @@ ast_enum! {
 ast_enum_of_structs! {
     /// Content of a compile-time structured attribute.
     ///
-    /// *This type is available if Syn is built with the `"derive"` or `"full"`
+    /// *This type is available only if Syn is built with the `"derive"` or `"full"`
     /// feature.*
     ///
     /// ## Path
@@ -383,10 +357,8 @@ ast_enum_of_structs! {
     ///
     /// This type is a [syntax tree enum].
     ///
-    /// [syntax tree enum]: enum.Expr.html#syntax-tree-enums
-    //
-    // TODO: change syntax-tree-enum link to an intra rustdoc link, currently
-    // blocked on https://github.com/rust-lang/rust/issues/62833
+    /// [syntax tree enum]: Expr#syntax-tree-enums
+    #[cfg_attr(doc_cfg, doc(cfg(any(feature = "full", feature = "derive"))))]
     pub enum Meta {
         Path(Path),
 
@@ -401,8 +373,9 @@ ast_enum_of_structs! {
 ast_struct! {
     /// A structured list within an attribute, like `derive(Copy, Clone)`.
     ///
-    /// *This type is available if Syn is built with the `"derive"` or
+    /// *This type is available only if Syn is built with the `"derive"` or
     /// `"full"` feature.*
+    #[cfg_attr(doc_cfg, doc(cfg(any(feature = "full", feature = "derive"))))]
     pub struct MetaList {
         pub path: Path,
         pub paren_token: token::Paren,
@@ -413,8 +386,9 @@ ast_struct! {
 ast_struct! {
     /// A name-value pair within an attribute, like `feature = "nightly"`.
     ///
-    /// *This type is available if Syn is built with the `"derive"` or
+    /// *This type is available only if Syn is built with the `"derive"` or
     /// `"full"` feature.*
+    #[cfg_attr(doc_cfg, doc(cfg(any(feature = "full", feature = "derive"))))]
     pub struct MetaNameValue {
         pub path: Path,
         pub eq_token: Token![=],
@@ -439,8 +413,9 @@ impl Meta {
 ast_enum_of_structs! {
     /// Element of a compile-time attribute list.
     ///
-    /// *This type is available if Syn is built with the `"derive"` or `"full"`
+    /// *This type is available only if Syn is built with the `"derive"` or `"full"`
     /// feature.*
+    #[cfg_attr(doc_cfg, doc(cfg(any(feature = "full", feature = "derive"))))]
     pub enum NestedMeta {
         /// A structured meta item, like the `Copy` in `#[derive(Copy)]` which
         /// would be a nested `Meta::Path`.
@@ -470,8 +445,8 @@ ast_enum_of_structs! {
 /// as type `AttributeArgs`.
 ///
 /// ```
-/// extern crate proc_macro;
-///
+/// # extern crate proc_macro;
+/// #
 /// use proc_macro::TokenStream;
 /// use syn::{parse_macro_input, AttributeArgs, ItemFn};
 ///
@@ -486,6 +461,7 @@ ast_enum_of_structs! {
 /// #   "".parse().unwrap()
 /// }
 /// ```
+#[cfg_attr(doc_cfg, doc(cfg(any(feature = "full", feature = "derive"))))]
 pub type AttributeArgs = Vec<NestedMeta>;
 
 pub trait FilterAttrs<'a> {
@@ -505,7 +481,7 @@ where
         fn is_outer(attr: &&Attribute) -> bool {
             match attr.style {
                 AttrStyle::Outer => true,
-                _ => false,
+                AttrStyle::Inner(_) => false,
             }
         }
         self.into_iter().filter(is_outer)
@@ -515,7 +491,7 @@ where
         fn is_inner(attr: &&Attribute) -> bool {
             match attr.style {
                 AttrStyle::Inner(_) => true,
-                _ => false,
+                AttrStyle::Outer => false,
             }
         }
         self.into_iter().filter(is_inner)
@@ -525,7 +501,6 @@ where
 #[cfg(feature = "parsing")]
 pub mod parsing {
     use super::*;
-
     use crate::ext::IdentExt;
     use crate::parse::{Parse, ParseStream, Result};
     #[cfg(feature = "full")]
@@ -555,7 +530,7 @@ pub mod parsing {
 
     #[cfg(feature = "full")]
     impl private {
-        pub fn attrs(outer: Vec<Attribute>, inner: Vec<Attribute>) -> Vec<Attribute> {
+        pub(crate) fn attrs(outer: Vec<Attribute>, inner: Vec<Attribute>) -> Vec<Attribute> {
             let mut attrs = outer;
             attrs.extend(inner);
             attrs
@@ -587,6 +562,7 @@ pub mod parsing {
         })
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "parsing")))]
     impl Parse for Meta {
         fn parse(input: ParseStream) -> Result<Self> {
             let path = input.call(parse_meta_path)?;
@@ -594,6 +570,7 @@ pub mod parsing {
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "parsing")))]
     impl Parse for MetaList {
         fn parse(input: ParseStream) -> Result<Self> {
             let path = input.call(parse_meta_path)?;
@@ -601,6 +578,7 @@ pub mod parsing {
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "parsing")))]
     impl Parse for MetaNameValue {
         fn parse(input: ParseStream) -> Result<Self> {
             let path = input.call(parse_meta_path)?;
@@ -608,11 +586,14 @@ pub mod parsing {
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "parsing")))]
     impl Parse for NestedMeta {
         fn parse(input: ParseStream) -> Result<Self> {
             if input.peek(Lit) && !(input.peek(LitBool) && input.peek2(Token![=])) {
                 input.parse().map(NestedMeta::Lit)
-            } else if input.peek(Ident::peek_any) {
+            } else if input.peek(Ident::peek_any)
+                || input.peek(Token![::]) && input.peek3(Ident::peek_any)
+            {
                 input.parse().map(NestedMeta::Meta)
             } else {
                 Err(input.error("expected identifier or literal"))
@@ -654,6 +635,7 @@ mod printing {
     use proc_macro2::TokenStream;
     use quote::ToTokens;
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "printing")))]
     impl ToTokens for Attribute {
         fn to_tokens(&self, tokens: &mut TokenStream) {
             self.pound_token.to_tokens(tokens);
@@ -667,6 +649,7 @@ mod printing {
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "printing")))]
     impl ToTokens for MetaList {
         fn to_tokens(&self, tokens: &mut TokenStream) {
             self.path.to_tokens(tokens);
@@ -676,6 +659,7 @@ mod printing {
         }
     }
 
+    #[cfg_attr(doc_cfg, doc(cfg(feature = "printing")))]
     impl ToTokens for MetaNameValue {
         fn to_tokens(&self, tokens: &mut TokenStream) {
             self.path.to_tokens(tokens);

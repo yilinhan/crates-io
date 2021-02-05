@@ -35,18 +35,18 @@ mod syn_parse {
 }
 
 #[cfg(not(syn_only))]
-mod libsyntax_parse {
+mod librustc_parse {
     extern crate rustc_data_structures;
+    extern crate rustc_errors;
     extern crate rustc_parse;
+    extern crate rustc_session;
     extern crate rustc_span;
-    extern crate syntax;
 
     use rustc_data_structures::sync::Lrc;
-    use rustc_span::FileName;
-    use syntax::edition::Edition;
-    use syntax::errors::{emitter::Emitter, Diagnostic, Handler};
-    use syntax::sess::ParseSess;
-    use syntax::source_map::{FilePathMapping, SourceMap};
+    use rustc_errors::{emitter::Emitter, Diagnostic, Handler};
+    use rustc_session::parse::ParseSess;
+    use rustc_span::source_map::{FilePathMapping, SourceMap};
+    use rustc_span::{edition::Edition, FileName};
 
     pub fn bench(content: &str) -> Result<(), ()> {
         struct SilentEmitter;
@@ -58,7 +58,7 @@ mod libsyntax_parse {
             }
         }
 
-        syntax::with_globals(Edition::Edition2018, || {
+        rustc_span::with_session_globals(Edition::Edition2018, || {
             let cm = Lrc::new(SourceMap::new(FilePathMapping::empty()));
             let emitter = Box::new(SilentEmitter);
             let handler = Handler::with_emitter(false, None, emitter);
@@ -115,11 +115,11 @@ fn main() {
     repo::clone_rust();
 
     macro_rules! testcases {
-        ($($(#[$cfg:meta])* $name:path,)*) => {
+        ($($(#[$cfg:meta])* $name:ident,)*) => {
             vec![
                 $(
                     $(#[$cfg])*
-                    (stringify!($name), $name as fn(&str) -> Result<(), ()>),
+                    (stringify!($name), $name::bench as fn(&str) -> Result<(), ()>),
                 )*
             ]
         };
@@ -139,12 +139,12 @@ fn main() {
 
     for (name, f) in testcases!(
         #[cfg(not(syn_only))]
-        read_from_disk::bench,
+        read_from_disk,
         #[cfg(not(syn_only))]
-        tokenstream_parse::bench,
-        syn_parse::bench,
+        tokenstream_parse,
+        syn_parse,
         #[cfg(not(syn_only))]
-        libsyntax_parse::bench,
+        librustc_parse,
     ) {
         eprint!("{:20}", format!("{}:", name));
         let elapsed = exec(f);

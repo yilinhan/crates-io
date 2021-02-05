@@ -1,6 +1,7 @@
 pub type c_char = i8;
 pub type c_long = i64;
 pub type c_ulong = u64;
+pub type caddr_t = *mut ::c_char;
 
 pub type clockid_t = ::c_int;
 pub type blkcnt_t = ::c_long;
@@ -19,8 +20,11 @@ pub type rlim_t = ::c_ulong;
 pub type speed_t = ::c_uint;
 pub type tcflag_t = ::c_uint;
 pub type time_t = ::c_long;
+pub type timer_t = ::c_int;
 pub type wchar_t = ::c_int;
 pub type nfds_t = ::c_ulong;
+pub type projid_t = ::c_int;
+pub type zoneid_t = ::c_int;
 
 pub type suseconds_t = ::c_long;
 pub type off_t = ::c_long;
@@ -36,14 +40,20 @@ pub type id_t = ::c_int;
 pub type idtype_t = ::c_uint;
 pub type shmatt_t = ::c_ulong;
 
-pub type door_attr_t = ::c_uint;
-pub type door_id_t = ::c_ulonglong;
-
 #[cfg_attr(feature = "extra_traits", derive(Debug))]
 pub enum timezone {}
 impl ::Copy for timezone {}
 impl ::Clone for timezone {
     fn clone(&self) -> timezone {
+        *self
+    }
+}
+
+#[cfg_attr(feature = "extra_traits", derive(Debug))]
+pub enum ucred_t {}
+impl ::Copy for ucred_t {}
+impl ::Clone for ucred_t {
+    fn clone(&self) -> ucred_t {
         *self
     }
 }
@@ -109,6 +119,11 @@ s! {
         pub ifa_netmask: *mut ::sockaddr,
         pub ifa_dstaddr: *mut ::sockaddr,
         pub ifa_data: *mut ::c_void
+    }
+
+    pub struct itimerspec {
+        pub it_interval: ::timespec,
+        pub it_value: ::timespec,
     }
 
     pub struct tm {
@@ -215,33 +230,6 @@ s! {
         pub ai_canonname: *mut ::c_char,
         pub ai_addr: *mut ::sockaddr,
         pub ai_next: *mut addrinfo,
-    }
-
-    pub struct shmid_ds {
-        pub shm_perm: ipc_perm,
-        pub shm_segsz: ::size_t,
-        #[cfg(target_os = "illumos")]
-        pub shm_amp: *mut ::c_void,
-        #[cfg(target_os = "solaris")]
-        pub shm_flags: ::uintptr_t,
-        pub shm_lkcnt: ::c_ushort,
-        pub shm_lpid: ::pid_t,
-        pub shm_cpid: ::pid_t,
-        pub shm_nattch: ::shmatt_t,
-        pub shm_cnattch: ::c_ulong,
-        pub shm_atime: ::time_t,
-        pub shm_dtime: ::time_t,
-        pub shm_ctime: ::time_t,
-        #[cfg(target_os = "illumos")]
-        pub shm_pad4: [i64; 4],
-        #[cfg(target_os = "solaris")]
-        pub shm_amp: *mut ::c_void,
-        #[cfg(target_os = "solaris")]
-        pub shm_gransize: u64,
-        #[cfg(target_os = "solaris")]
-        pub shm_allocated: u64,
-        #[cfg(target_os = "solaris")]
-        pub shm_pad4: [i64; 1],
     }
 
     pub struct sigset_t {
@@ -371,7 +359,7 @@ s! {
         pub mq_maxmsg: ::c_long,
         pub mq_msgsize: ::c_long,
         pub mq_curmsgs: ::c_long,
-        _pad: [::c_int; 4]
+        _pad: [::c_int; 12]
     }
 
     pub struct port_event {
@@ -382,9 +370,9 @@ s! {
         pub portev_user: *mut ::c_void,
     }
 
-    pub struct door_desc_t__d_data__d_desc {
-        pub d_descriptor: ::c_int,
-        pub d_id: ::door_id_t
+    pub struct port_notify {
+        pub portnfy_port: ::c_int,
+        pub portnfy_user: *mut ::c_void,
     }
 
     pub struct exit_status {
@@ -431,7 +419,14 @@ s! {
 }
 
 s_no_extra_traits! {
-    #[cfg_attr(any(target_arch = "x86", target_arch = "x86_64"), repr(packed))]
+    #[cfg_attr(all(
+            any(target_arch = "x86", target_arch = "x86_64"),
+            libc_packedN
+        ), repr(packed(4)))]
+    #[cfg_attr(all(
+            any(target_arch = "x86", target_arch = "x86_64"),
+            not(libc_packedN)
+        ), repr(packed))]
     pub struct epoll_event {
         pub events: u32,
         pub u64: u64,
@@ -504,28 +499,6 @@ s_no_extra_traits! {
         pub ss_sp: *mut ::c_void,
         pub sigev_notify_attributes: *const ::pthread_attr_t,
         __sigev_pad2: ::c_int,
-    }
-
-    #[cfg_attr(feature = "extra_traits", allow(missing_debug_implementations))]
-    pub union door_desc_t__d_data {
-        pub d_desc: door_desc_t__d_data__d_desc,
-        d_resv: [::c_int; 5], /* Check out /usr/include/sys/door.h */
-    }
-
-    #[cfg_attr(feature = "extra_traits", allow(missing_debug_implementations))]
-    pub struct door_desc_t {
-        pub d_attributes: door_attr_t,
-        pub d_data: door_desc_t__d_data,
-    }
-
-    #[cfg_attr(feature = "extra_traits", allow(missing_debug_implementations))]
-    pub struct door_arg_t {
-        pub data_ptr: *const ::c_char,
-        pub data_size: ::size_t,
-        pub desc_ptr: *const door_desc_t,
-        pub dec_num: ::c_uint,
-        pub rbuf: *const ::c_char,
-        pub rsize: ::size_t,
     }
 }
 
@@ -999,6 +972,8 @@ pub const EOF: ::c_int = -1;
 pub const SEEK_SET: ::c_int = 0;
 pub const SEEK_CUR: ::c_int = 1;
 pub const SEEK_END: ::c_int = 2;
+pub const SEEK_DATA: ::c_int = 3;
+pub const SEEK_HOLE: ::c_int = 4;
 pub const _IOFBF: ::c_int = 0;
 pub const _IONBF: ::c_int = 4;
 pub const _IOLBF: ::c_int = 64;
@@ -1018,7 +993,7 @@ pub const O_CREAT: ::c_int = 256;
 pub const O_EXCL: ::c_int = 1024;
 pub const O_NOCTTY: ::c_int = 2048;
 pub const O_TRUNC: ::c_int = 512;
-pub const O_NOFOLLOW: ::c_int = 0x200000;
+pub const O_NOFOLLOW: ::c_int = 0x20000;
 pub const O_SEARCH: ::c_int = 0x200000;
 pub const O_EXEC: ::c_int = 0x400000;
 pub const O_CLOEXEC: ::c_int = 0x800000;
@@ -1151,7 +1126,6 @@ pub const MCL_FUTURE: ::c_int = 0x0002;
 pub const MS_SYNC: ::c_int = 0x0004;
 pub const MS_ASYNC: ::c_int = 0x0001;
 pub const MS_INVALIDATE: ::c_int = 0x0002;
-pub const MS_INVALCURPROC: ::c_int = 0x0008;
 
 pub const EPERM: ::c_int = 1;
 pub const ENOENT: ::c_int = 2;
@@ -1361,7 +1335,7 @@ pub const RLIMIT_AS: ::c_int = RLIMIT_VMEM;
 
 #[deprecated(since = "0.2.64", note = "Not stable across OS versions")]
 pub const RLIM_NLIMITS: rlim_t = 7;
-pub const RLIM_INFINITY: rlim_t = 0x7fffffff;
+pub const RLIM_INFINITY: rlim_t = 0xfffffffffffffffd;
 
 pub const RUSAGE_SELF: ::c_int = 0;
 pub const RUSAGE_CHILDREN: ::c_int = -1;
@@ -1375,8 +1349,6 @@ pub const MADV_FREE: ::c_int = 5;
 
 pub const AF_UNSPEC: ::c_int = 0;
 pub const AF_UNIX: ::c_int = 1;
-pub const AF_LOCAL: ::c_int = 0;
-pub const AF_FILE: ::c_int = 0;
 pub const AF_INET: ::c_int = 2;
 pub const AF_IMPLINK: ::c_int = 3;
 pub const AF_PUP: ::c_int = 4;
@@ -1408,7 +1380,6 @@ pub const AF_POLICY: ::c_int = 29;
 pub const AF_INET_OFFLOAD: ::c_int = 30;
 pub const AF_TRILL: ::c_int = 31;
 pub const AF_PACKET: ::c_int = 32;
-pub const AF_LX_NETLINK: ::c_int = 33;
 
 pub const SOCK_DGRAM: ::c_int = 1;
 pub const SOCK_STREAM: ::c_int = 2;
@@ -1425,8 +1396,25 @@ pub const IP_DROP_MEMBERSHIP: ::c_int = 20;
 pub const IPV6_JOIN_GROUP: ::c_int = 9;
 pub const IPV6_LEAVE_GROUP: ::c_int = 10;
 
-pub const TCP_NODELAY: ::c_int = 1;
-pub const TCP_KEEPIDLE: ::c_int = 34;
+// These TCP socket options are common between illumos and Solaris, while higher
+// numbers have generally diverged:
+pub const TCP_NODELAY: ::c_int = 0x1;
+pub const TCP_MAXSEG: ::c_int = 0x2;
+pub const TCP_KEEPALIVE: ::c_int = 0x8;
+pub const TCP_NOTIFY_THRESHOLD: ::c_int = 0x10;
+pub const TCP_ABORT_THRESHOLD: ::c_int = 0x11;
+pub const TCP_CONN_NOTIFY_THRESHOLD: ::c_int = 0x12;
+pub const TCP_CONN_ABORT_THRESHOLD: ::c_int = 0x13;
+pub const TCP_RECVDSTADDR: ::c_int = 0x14;
+pub const TCP_INIT_CWND: ::c_int = 0x15;
+pub const TCP_KEEPALIVE_THRESHOLD: ::c_int = 0x16;
+pub const TCP_KEEPALIVE_ABORT_THRESHOLD: ::c_int = 0x17;
+pub const TCP_CORK: ::c_int = 0x18;
+pub const TCP_RTO_INITIAL: ::c_int = 0x19;
+pub const TCP_RTO_MIN: ::c_int = 0x1a;
+pub const TCP_RTO_MAX: ::c_int = 0x1b;
+pub const TCP_LINGER2: ::c_int = 0x1c;
+
 pub const SOL_SOCKET: ::c_int = 0xffff;
 pub const SO_DEBUG: ::c_int = 0x01;
 pub const SO_ACCEPTCONN: ::c_int = 0x0002;
@@ -1464,6 +1452,9 @@ pub const MSG_NOSIGNAL: ::c_int = 0x200;
 pub const MSG_DUPCTRL: ::c_int = 0x800;
 pub const MSG_XPG4_2: ::c_int = 0x8000;
 pub const MSG_MAXIOVLEN: ::c_int = 16;
+
+pub const IF_NAMESIZE: ::size_t = 32;
+pub const IFNAMSIZ: ::size_t = 16;
 
 // https://docs.oracle.com/cd/E23824_01/html/821-1475/if-7p.html
 pub const IFF_UP: ::c_int = 0x0000000001; // Address is up
@@ -1780,8 +1771,6 @@ pub const PORT_SOURCE_FD: ::c_int = 4;
 pub const PORT_SOURCE_ALERT: ::c_int = 5;
 pub const PORT_SOURCE_MQ: ::c_int = 6;
 pub const PORT_SOURCE_FILE: ::c_int = 7;
-pub const PORT_SOURCE_POSTWAIT: ::c_int = 8;
-pub const PORT_SOURCE_SIGNAL: ::c_int = 9;
 
 pub const NONROOT_USR: ::c_short = 2;
 pub const _UTX_USERSIZE: usize = 32;
@@ -1832,8 +1821,6 @@ pub const TIOCGWINSZ: ::c_int = _TIOC | 104;
 pub const TIOCSWINSZ: ::c_int = _TIOC | 103;
 pub const TIOCGSOFTCAR: ::c_int = _TIOC | 105;
 pub const TIOCSSOFTCAR: ::c_int = _TIOC | 106;
-pub const TIOCSETLD: ::c_int = _TIOC | 123;
-pub const TIOCGETLD: ::c_int = _TIOC | 124;
 pub const TIOCGPPS: ::c_int = _TIOC | 125;
 pub const TIOCSPPS: ::c_int = _TIOC | 126;
 pub const TIOCGPPSEV: ::c_int = _TIOC | 127;
@@ -1888,8 +1875,9 @@ pub const EPOLLERR: ::c_int = 0x8;
 pub const EPOLLHUP: ::c_int = 0x10;
 pub const EPOLLET: ::c_int = 0x80000000;
 pub const EPOLLRDHUP: ::c_int = 0x2000;
-pub const EPOLLEXCLUSIVE: ::c_int = 0x10000000;
 pub const EPOLLONESHOT: ::c_int = 0x40000000;
+pub const EPOLLWAKEUP: ::c_int = 0x20000000;
+pub const EPOLLEXCLUSIVE: ::c_int = 0x10000000;
 pub const EPOLL_CLOEXEC: ::c_int = 0x80000;
 pub const EPOLL_CTL_ADD: ::c_int = 1;
 pub const EPOLL_CTL_MOD: ::c_int = 3;
@@ -1920,9 +1908,9 @@ pub const B230400: speed_t = 20;
 pub const B307200: speed_t = 21;
 pub const B460800: speed_t = 22;
 pub const B921600: speed_t = 23;
-pub const CSTART: ::tcflag_t = 021;
-pub const CSTOP: ::tcflag_t = 023;
-pub const CSWTCH: ::tcflag_t = 032;
+pub const CSTART: ::tcflag_t = 0o21;
+pub const CSTOP: ::tcflag_t = 0o23;
+pub const CSWTCH: ::tcflag_t = 0o32;
 pub const CSIZE: ::tcflag_t = 0o000060;
 pub const CS5: ::tcflag_t = 0;
 pub const CS6: ::tcflag_t = 0o000020;
@@ -1989,6 +1977,44 @@ pub const VLNEXT: usize = 15;
 pub const VSTATUS: usize = 16;
 pub const VERASE2: usize = 17;
 
+// <sys/stropts.h>
+const STR: ::c_int = (b'S' as ::c_int) << 8;
+pub const I_NREAD: ::c_int = STR | 0o1;
+pub const I_PUSH: ::c_int = STR | 0o2;
+pub const I_POP: ::c_int = STR | 0o3;
+pub const I_LOOK: ::c_int = STR | 0o4;
+pub const I_FLUSH: ::c_int = STR | 0o5;
+pub const I_SRDOPT: ::c_int = STR | 0o6;
+pub const I_GRDOPT: ::c_int = STR | 0o7;
+pub const I_STR: ::c_int = STR | 0o10;
+pub const I_SETSIG: ::c_int = STR | 0o11;
+pub const I_GETSIG: ::c_int = STR | 0o12;
+pub const I_FIND: ::c_int = STR | 0o13;
+pub const I_LINK: ::c_int = STR | 0o14;
+pub const I_UNLINK: ::c_int = STR | 0o15;
+pub const I_PEEK: ::c_int = STR | 0o17;
+pub const I_FDINSERT: ::c_int = STR | 0o20;
+pub const I_SENDFD: ::c_int = STR | 0o21;
+pub const I_RECVFD: ::c_int = STR | 0o16;
+pub const I_SWROPT: ::c_int = STR | 0o23;
+pub const I_GWROPT: ::c_int = STR | 0o24;
+pub const I_LIST: ::c_int = STR | 0o25;
+pub const I_PLINK: ::c_int = STR | 0o26;
+pub const I_PUNLINK: ::c_int = STR | 0o27;
+pub const I_ANCHOR: ::c_int = STR | 0o30;
+pub const I_FLUSHBAND: ::c_int = STR | 0o34;
+pub const I_CKBAND: ::c_int = STR | 0o35;
+pub const I_GETBAND: ::c_int = STR | 0o36;
+pub const I_ATMARK: ::c_int = STR | 0o37;
+pub const I_SETCLTIME: ::c_int = STR | 0o40;
+pub const I_GETCLTIME: ::c_int = STR | 0o41;
+pub const I_CANPUT: ::c_int = STR | 0o42;
+pub const I_SERROPT: ::c_int = STR | 0o43;
+pub const I_GERROPT: ::c_int = STR | 0o44;
+pub const I_ESETSIG: ::c_int = STR | 0o45;
+pub const I_EGETSIG: ::c_int = STR | 0o46;
+pub const __I_PUSH_NOCTTY: ::c_int = STR | 0o47;
+
 // 3SOCKET flags
 pub const SOCK_CLOEXEC: ::c_int = 0x080000;
 pub const SOCK_NONBLOCK: ::c_int = 0x100000;
@@ -2046,7 +2072,67 @@ pub const TIME_OOP: i32 = 3;
 pub const TIME_WAIT: i32 = 4;
 pub const TIME_ERROR: i32 = 5;
 
+pub const PRIO_PROCESS: ::c_int = 0;
+pub const PRIO_PGRP: ::c_int = 1;
+pub const PRIO_USER: ::c_int = 2;
+
+// As per sys/socket.h, header alignment must be 8 bytes on SPARC
+// and 4 bytes everywhere else:
+#[cfg(target_arch = "sparc64")]
+const _CMSG_HDR_ALIGNMENT: usize = 8;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+const _CMSG_HDR_ALIGNMENT: usize = 4;
+
+const _CMSG_DATA_ALIGNMENT: usize = ::mem::size_of::<::c_int>();
+
+fn _CMSG_HDR_ALIGN(p: usize) -> usize {
+    (p + _CMSG_HDR_ALIGNMENT - 1) & !(_CMSG_HDR_ALIGNMENT - 1)
+}
+
+fn _CMSG_DATA_ALIGN(p: usize) -> usize {
+    (p + _CMSG_DATA_ALIGNMENT - 1) & !(_CMSG_DATA_ALIGNMENT - 1)
+}
+
 f! {
+    pub fn CMSG_DATA(cmsg: *const ::cmsghdr) -> *mut ::c_uchar {
+        _CMSG_DATA_ALIGN(cmsg.offset(1) as usize) as *mut ::c_uchar
+    }
+
+    pub fn CMSG_LEN(length: ::c_uint) -> ::c_uint {
+        _CMSG_DATA_ALIGN(::mem::size_of::<::cmsghdr>()) as ::c_uint + length
+    }
+
+    pub fn CMSG_FIRSTHDR(mhdr: *const ::msghdr) -> *mut ::cmsghdr {
+        if ((*mhdr).msg_controllen as usize) < ::mem::size_of::<::cmsghdr>() {
+            0 as *mut ::cmsghdr
+        } else {
+            (*mhdr).msg_control as *mut ::cmsghdr
+        }
+    }
+
+    pub fn CMSG_NXTHDR(mhdr: *const ::msghdr, cmsg: *const ::cmsghdr)
+        -> *mut ::cmsghdr
+    {
+        if cmsg.is_null() {
+            return ::CMSG_FIRSTHDR(mhdr);
+        };
+        let next = _CMSG_HDR_ALIGN(cmsg as usize + (*cmsg).cmsg_len as usize
+            + ::mem::size_of::<::cmsghdr>());
+        let max = (*mhdr).msg_control as usize
+            + (*mhdr).msg_controllen as usize;
+        if next > max {
+            0 as *mut ::cmsghdr
+        } else {
+            _CMSG_HDR_ALIGN(cmsg as usize + (*cmsg).cmsg_len as usize)
+                as *mut ::cmsghdr
+        }
+    }
+
+    pub fn CMSG_SPACE(length: ::c_uint) -> ::c_uint {
+        _CMSG_HDR_ALIGN(::mem::size_of::<::cmsghdr>() as usize
+            + length as usize) as ::c_uint
+    }
+
     pub fn FD_CLR(fd: ::c_int, set: *mut fd_set) -> () {
         let bits = ::mem::size_of_val(&(*set).fds_bits[0]) * 8;
         let fd = fd as usize;
@@ -2072,36 +2158,38 @@ f! {
             *slot = 0;
         }
     }
+}
 
-    pub fn WIFEXITED(status: ::c_int) -> bool {
+safe_f! {
+    pub {const} fn WIFEXITED(status: ::c_int) -> bool {
         (status & 0xFF) == 0
     }
 
-    pub fn WEXITSTATUS(status: ::c_int) -> ::c_int {
+    pub {const} fn WEXITSTATUS(status: ::c_int) -> ::c_int {
         (status >> 8) & 0xFF
     }
 
-    pub fn WTERMSIG(status: ::c_int) -> ::c_int {
+    pub {const} fn WTERMSIG(status: ::c_int) -> ::c_int {
         status & 0x7F
     }
 
-    pub fn WIFCONTINUED(status: ::c_int) -> bool {
+    pub {const} fn WIFCONTINUED(status: ::c_int) -> bool {
         (status & 0xffff) == 0xffff
     }
 
-    pub fn WSTOPSIG(status: ::c_int) -> ::c_int {
+    pub {const} fn WSTOPSIG(status: ::c_int) -> ::c_int {
         (status & 0xff00) >> 8
     }
 
-    pub fn WIFSIGNALED(status: ::c_int) -> bool {
+    pub {const} fn WIFSIGNALED(status: ::c_int) -> bool {
         ((status & 0xff) > 0) && (status & 0xff00 == 0)
     }
 
-    pub fn WIFSTOPPED(status: ::c_int) -> bool {
+    pub {const} fn WIFSTOPPED(status: ::c_int) -> bool {
         ((status & 0xff) == 0x7f) && ((status & 0xff00) != 0)
     }
 
-    pub fn WCOREDUMP(status: ::c_int) -> bool {
+    pub {const} fn WCOREDUMP(status: ::c_int) -> bool {
         (status & 0x80) != 0
     }
 }
@@ -2137,11 +2225,6 @@ extern "C" {
     pub fn freeifaddrs(ifa: *mut ::ifaddrs);
 
     pub fn stack_getbounds(sp: *mut ::stack_t) -> ::c_int;
-    pub fn mincore(
-        addr: *const ::c_void,
-        len: ::size_t,
-        vec: *mut c_char,
-    ) -> ::c_int;
     pub fn initgroups(name: *const ::c_char, basegid: ::gid_t) -> ::c_int;
     pub fn setgroups(ngroups: ::c_int, ptr: *const ::gid_t) -> ::c_int;
     pub fn ioctl(fildes: ::c_int, request: ::c_int, ...) -> ::c_int;
@@ -2213,6 +2296,11 @@ extern "C" {
         f: extern "C" fn(*mut ::c_void) -> *mut ::c_void,
         value: *mut ::c_void,
     ) -> ::c_int;
+    pub fn pthread_attr_getstack(
+        attr: *const ::pthread_attr_t,
+        stackaddr: *mut *mut ::c_void,
+        stacksize: *mut ::size_t,
+    ) -> ::c_int;
     pub fn pthread_condattr_getclock(
         attr: *const pthread_condattr_t,
         clock_id: *mut clockid_t,
@@ -2237,6 +2325,7 @@ extern "C" {
         options: ::c_int,
     ) -> ::c_int;
 
+    #[cfg_attr(target_os = "illumos", link_name = "_glob_ext")]
     pub fn glob(
         pattern: *const ::c_char,
         flags: ::c_int,
@@ -2246,6 +2335,7 @@ extern "C" {
         pglob: *mut ::glob_t,
     ) -> ::c_int;
 
+    #[cfg_attr(target_os = "illumos", link_name = "_globfree_ext")]
     pub fn globfree(pglob: *mut ::glob_t);
 
     pub fn posix_madvise(
@@ -2347,6 +2437,12 @@ extern "C" {
         msg: *mut ::msghdr,
         flags: ::c_int,
     ) -> ::ssize_t;
+    pub fn accept4(
+        fd: ::c_int,
+        address: *mut sockaddr,
+        address_len: *mut socklen_t,
+        flags: ::c_int,
+    ) -> ::c_int;
 
     pub fn mq_open(name: *const ::c_char, oflag: ::c_int, ...) -> ::mqd_t;
     pub fn mq_close(mqd: ::mqd_t) -> ::c_int;
@@ -2419,11 +2515,6 @@ extern "C" {
         nent: ::c_uint,
         events: ::c_int,
         user: *mut ::c_void,
-    ) -> ::c_int;
-    pub fn fexecve(
-        fd: ::c_int,
-        argv: *const *const ::c_char,
-        envp: *const *const ::c_char,
     ) -> ::c_int;
     #[cfg_attr(
         any(target_os = "solaris", target_os = "illumos"),
@@ -2549,25 +2640,6 @@ extern "C" {
     pub fn dup3(src: ::c_int, dst: ::c_int, flags: ::c_int) -> ::c_int;
     pub fn uname(buf: *mut ::utsname) -> ::c_int;
     pub fn pipe2(fds: *mut ::c_int, flags: ::c_int) -> ::c_int;
-    pub fn door_call(d: ::c_int, params: *const door_arg_t) -> ::c_int;
-    pub fn door_return(
-        data_ptr: *const ::c_char,
-        data_size: ::size_t,
-        desc_ptr: *const door_desc_t,
-        num_desc: ::c_uint,
-    );
-    pub fn door_create(
-        server_procedure: extern "C" fn(
-            cookie: *const ::c_void,
-            argp: *const ::c_char,
-            arg_size: ::size_t,
-            dp: *const door_desc_t,
-            n_desc: ::c_uint,
-        ),
-        cookie: *const ::c_void,
-        attributes: door_attr_t,
-    ) -> ::c_int;
-    pub fn fattach(fildes: ::c_int, path: *const ::c_char) -> ::c_int;
 
     pub fn makeutx(ux: *const utmpx) -> *mut utmpx;
     pub fn modutx(ux: *const utmpx) -> *mut utmpx;
@@ -2594,7 +2666,57 @@ extern "C" {
 
     pub fn ntp_adjtime(buf: *mut timex) -> ::c_int;
     pub fn ntp_gettime(buf: *mut ntptimeval) -> ::c_int;
+
+    pub fn timer_create(
+        clock_id: clockid_t,
+        evp: *mut sigevent,
+        timerid: *mut timer_t,
+    ) -> ::c_int;
+    pub fn timer_delete(timerid: timer_t) -> ::c_int;
+    pub fn timer_getoverrun(timerid: timer_t) -> ::c_int;
+    pub fn timer_gettime(timerid: timer_t, value: *mut itimerspec) -> ::c_int;
+    pub fn timer_settime(
+        timerid: timer_t,
+        flags: ::c_int,
+        value: *const itimerspec,
+        ovalue: *mut itimerspec,
+    ) -> ::c_int;
+
+    pub fn ucred_get(pid: ::pid_t) -> *mut ucred_t;
+    pub fn getpeerucred(fd: ::c_int, ucred: *mut *mut ucred_t) -> ::c_int;
+
+    pub fn ucred_free(ucred: *mut ucred_t);
+
+    pub fn ucred_geteuid(ucred: *const ucred_t) -> ::uid_t;
+    pub fn ucred_getruid(ucred: *const ucred_t) -> ::uid_t;
+    pub fn ucred_getsuid(ucred: *const ucred_t) -> ::uid_t;
+    pub fn ucred_getegid(ucred: *const ucred_t) -> ::gid_t;
+    pub fn ucred_getrgid(ucred: *const ucred_t) -> ::gid_t;
+    pub fn ucred_getsgid(ucred: *const ucred_t) -> ::gid_t;
+    pub fn ucred_getgroups(
+        ucred: *const ucred_t,
+        groups: *mut *const ::gid_t,
+    ) -> ::c_int;
+    pub fn ucred_getpid(ucred: *const ucred_t) -> ::pid_t;
+    pub fn ucred_getprojid(ucred: *const ucred_t) -> projid_t;
+    pub fn ucred_getzoneid(ucred: *const ucred_t) -> zoneid_t;
+    pub fn ucred_getpflags(ucred: *const ucred_t, flags: ::c_uint)
+        -> ::c_uint;
+
+    pub fn ucred_size() -> ::size_t;
 }
 
 mod compat;
 pub use self::compat::*;
+
+cfg_if! {
+    if #[cfg(target_os = "illumos")] {
+        mod illumos;
+        pub use self::illumos::*;
+    } else if #[cfg(target_os = "solaris")] {
+        mod solaris;
+        pub use self::solaris::*;
+    } else {
+        // Unknown target_os
+    }
+}

@@ -1,12 +1,12 @@
 mod meta_item;
 
-use syn::{self, Lit::*};
-
-pub use self::meta_item::{MetaItem, MetaItemList};
+use syn::{self, Lit::*, spanned::Spanned};
+use proc_macro2_diagnostics::SpanDiagnosticExt;
+use proc_macro2::Span;
 
 use generator::Result;
-use spanned::Spanned;
-use proc_macro::Span;
+
+pub use self::meta_item::{MetaItem, MetaItemList};
 
 // Spans of k/v pair, key, then value.
 #[derive(Copy, Clone)]
@@ -48,7 +48,7 @@ pub trait FromMeta: Sized {
 
         if let Some(extra) = matches.next() {
             let msg = format!("duplicate invocation of `{}` attribute", name);
-            return Some(Err(extra.span().error(msg)));
+            return Some(Err(extra.path.span().error(msg)));
         }
 
         Some(Self::from_attr(name, attr))

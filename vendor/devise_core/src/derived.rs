@@ -1,8 +1,8 @@
 use syn;
 use quote::ToTokens;
 
-use proc_macro2::TokenStream as TokenStream2;
-use field::{Field, FieldParent, Fields};
+use proc_macro2::TokenStream;
+use field::{Field, FieldParent, Fields, FieldsKind};
 
 #[derive(Debug)]
 pub struct Derived<'p, T: 'p> {
@@ -31,7 +31,7 @@ impl<'p, T> ::std::ops::Deref for Derived<'p, T> {
 }
 
 impl<'p, T: ToTokens> ToTokens for Derived<'p, T> {
-    fn to_tokens(&self, tokens: &mut TokenStream2) {
+    fn to_tokens(&self, tokens: &mut TokenStream) {
         self.value.to_tokens(tokens)
     }
 }
@@ -45,23 +45,22 @@ impl<'p, T> Clone for Derived<'p, T> {
 }
 
 impl<'f> Variant<'f> {
-    pub fn builder<F: Fn(Field) -> TokenStream2>(&self, f: F) -> TokenStream2 {
+    pub fn builder<F: Fn(Field) -> TokenStream>(&self, f: F) -> TokenStream {
         let variant = &self.ident;
         let expression = self.fields().iter().map(f);
         let enum_name = &self.derive_input.ident;
-        if self.fields().are_named() {
-            let field_name = self.fields.iter().map(|f| f.ident.as_ref().unwrap());
-            quote! {
-                #enum_name::#variant { #(#field_name: #expression),* }
+        match self.fields().kind {
+            FieldsKind::Named(..) => {
+                let field_name = self.fields.iter()
+                    .map(|f| f.ident.as_ref().unwrap());
+                quote! {
+                    #enum_name::#variant { #(#field_name: #expression),* }
+                }
+            },
+            FieldsKind::Unnamed(..) => {
+                quote!( #enum_name::#variant(#(#expression),*) )
             }
-        } else if self.fields().are_unnamed() {
-            quote! {
-                #enum_name::#variant(#(#expression),*)
-            }
-        } else {
-            quote! {
-                #enum_name::#variant
-            }
+            FieldsKind::Unit => quote!(#enum_name::#variant),
         }
     }
 
@@ -80,5 +79,22 @@ impl<'p> Enum<'p> {
 impl<'p> Struct<'p> {
     pub fn fields(self) -> Fields<'p> {
         FieldParent::Struct(self).fields()
+    }
+
+    pub fn builder<F: Fn(Field) -> TokenStream>(&self, f: F) -> TokenStream {
+        let expression = self.fields().iter().map(f);
+        let struct_name = &self.derive_input.ident;
+        match self.fields().kind {
+            FieldsKind::Named(..) => {
+                let field_name = self.fields.iter()
+                    .map(|f| f.ident.as_ref().unwrap());
+
+                quote!(#struct_name { #(#field_name: #expression),* })
+            },
+            FieldsKind::Unnamed(..) => {
+                quote!(#struct_name ( #(#expression),* ))
+            }
+            FieldsKind::Unit => quote!(#struct_name),
+        }
     }
 }

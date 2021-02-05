@@ -1,8 +1,8 @@
-use std::fmt;
-use std::error::Error;
-use crate::msgs::enums::{ContentType, HandshakeType, AlertDescription};
-use webpki;
+use crate::msgs::enums::{AlertDescription, ContentType, HandshakeType};
 use sct;
+use std::error::Error;
+use std::fmt;
+use webpki;
 
 /// rustls reports protocol errors using this type.
 #[derive(Debug, PartialEq, Clone)]
@@ -64,19 +64,20 @@ pub enum TLSError {
     /// We failed to figure out what time it currently is.
     FailedToGetCurrentTime,
 
-    /// A syntactically-invalid DNS hostname was given.
-    InvalidDNSName(String),
-
     /// This function doesn't work until the TLS handshake
     /// is complete.
     HandshakeNotComplete,
 
     /// The peer sent an oversized record/fragment.
     PeerSentOversizedRecord,
+
+    /// An incoming connection did not support any known application protocol.
+    NoApplicationProtocol,
 }
 
 fn join<T: fmt::Debug>(items: &[T]) -> String {
-    items.iter()
+    items
+        .iter()
         .map(|x| format!("{:?}", x))
         .collect::<Vec<String>>()
         .join(" or ")
@@ -85,98 +86,82 @@ fn join<T: fmt::Debug>(items: &[T]) -> String {
 impl fmt::Display for TLSError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            TLSError::InappropriateMessage { ref expect_types, ref got_type } => {
-                write!(f,
-                       "{}: got {:?} when expecting {}",
-                       self.description(),
-                       got_type,
-                       join::<ContentType>(expect_types))
-            }
-            TLSError::InappropriateHandshakeMessage { ref expect_types, ref got_type } => {
-                write!(f,
-                       "{}: got {:?} when expecting {}",
-                       self.description(),
-                       got_type,
-                       join::<HandshakeType>(expect_types))
-            }
+            TLSError::InappropriateMessage {
+                ref expect_types,
+                ref got_type,
+            } => write!(
+                f,
+                "received unexpected message: got {:?} when expecting {}",
+                got_type,
+                join::<ContentType>(expect_types)
+            ),
+            TLSError::InappropriateHandshakeMessage {
+                ref expect_types,
+                ref got_type,
+            } => write!(
+                f,
+                "received unexpected handshake message: got {:?} when expecting {}",
+                got_type,
+                join::<HandshakeType>(expect_types)
+            ),
             TLSError::CorruptMessagePayload(ref typ) => {
-                write!(f, "{} of type {:?}", self.description(), typ)
+                write!(f, "received corrupt message of type {:?}", typ)
             }
-            TLSError::PeerIncompatibleError(ref why) |
-            TLSError::PeerMisbehavedError(ref why) => write!(f, "{}: {}", self.description(), why),
-            TLSError::AlertReceived(ref alert) => write!(f, "{}: {:?}", self.description(), alert),
-            TLSError::WebPKIError(ref err) => write!(f, "{}: {:?}", self.description(), err),
-            TLSError::CorruptMessage |
-            TLSError::NoCertificatesPresented |
-            TLSError::DecryptError |
-            TLSError::PeerSentOversizedRecord |
-            TLSError::HandshakeNotComplete => write!(f, "{}", self.description()),
-            _ => write!(f, "{}: {:?}", self.description(), self),
+            TLSError::PeerIncompatibleError(ref why) => write!(f, "peer is incompatible: {}", why),
+            TLSError::PeerMisbehavedError(ref why) => write!(f, "peer misbehaved: {}", why),
+            TLSError::AlertReceived(ref alert) => write!(f, "received fatal alert: {:?}", alert),
+            TLSError::WebPKIError(ref err) => write!(f, "invalid certificate: {:?}", err),
+            TLSError::CorruptMessage => write!(f, "received corrupt message"),
+            TLSError::NoCertificatesPresented => write!(f, "peer sent no certificates"),
+            TLSError::DecryptError => write!(f, "cannot decrypt peer's message"),
+            TLSError::PeerSentOversizedRecord => write!(f, "peer sent excess record size"),
+            TLSError::HandshakeNotComplete => write!(f, "handshake not complete"),
+            TLSError::NoApplicationProtocol => write!(f, "peer doesn't support any known protocol"),
+            TLSError::InvalidSCT(ref err) => write!(f, "invalid certificate timestamp: {:?}", err),
+            TLSError::FailedToGetCurrentTime => write!(f, "failed to get current time"),
+            TLSError::General(ref err) => write!(f, "unexpected error: {}", err), // (please file a bug)
         }
     }
 }
 
-impl Error for TLSError {
-    fn description(&self) -> &str {
-        match *self {
-            TLSError::InappropriateMessage { .. } => "received unexpected message",
-            TLSError::InappropriateHandshakeMessage { .. } => {
-                "received unexpected handshake message"
-            }
-            TLSError::CorruptMessage |
-                TLSError::CorruptMessagePayload(_) => "received corrupt message",
-            TLSError::NoCertificatesPresented => "peer sent no certificates",
-            TLSError::DecryptError => "cannot decrypt peer's message",
-            TLSError::PeerIncompatibleError(_) => "peer is incompatible",
-            TLSError::PeerMisbehavedError(_) => "peer misbehaved",
-            TLSError::AlertReceived(_) => "received fatal alert",
-            TLSError::WebPKIError(_) => "invalid certificate",
-            TLSError::InvalidSCT(_) => "invalid certificate timestamp",
-            TLSError::General(_) => "unexpected error", // (please file a bug),
-            TLSError::FailedToGetCurrentTime => "failed to get current time",
-            TLSError::InvalidDNSName(_) => "invalid DNS name",
-            TLSError::HandshakeNotComplete => "handshake not complete",
-            TLSError::PeerSentOversizedRecord => "peer sent excess record size",
-        }
-    }
-}
+impl Error for TLSError {}
 
 #[cfg(test)]
 mod tests {
     #[test]
     fn smoke() {
         use super::TLSError;
-        use std::error::Error;
-        use crate::msgs::enums::{ContentType, HandshakeType, AlertDescription};
-        use webpki;
+        use crate::msgs::enums::{AlertDescription, ContentType, HandshakeType};
         use sct;
+        use webpki;
 
-        let all = vec![TLSError::InappropriateMessage {
-                           expect_types: vec![ContentType::Alert],
-                           got_type: ContentType::Handshake,
-                       },
-                       TLSError::InappropriateHandshakeMessage {
-                           expect_types: vec![HandshakeType::ClientHello, HandshakeType::Finished],
-                           got_type: HandshakeType::ServerHello,
-                       },
-                       TLSError::CorruptMessage,
-                       TLSError::CorruptMessagePayload(ContentType::Alert),
-                       TLSError::NoCertificatesPresented,
-                       TLSError::DecryptError,
-                       TLSError::PeerIncompatibleError("no tls1.2".to_string()),
-                       TLSError::PeerMisbehavedError("inconsistent something".to_string()),
-                       TLSError::AlertReceived(AlertDescription::ExportRestriction),
-                       TLSError::WebPKIError(webpki::Error::ExtensionValueInvalid),
-                       TLSError::InvalidSCT(sct::Error::MalformedSCT),
-                       TLSError::General("undocumented error".to_string()),
-                       TLSError::FailedToGetCurrentTime,
-                       TLSError::InvalidDNSName("dns something".to_string()),
-                       TLSError::HandshakeNotComplete,
-                       TLSError::PeerSentOversizedRecord];
+        let all = vec![
+            TLSError::InappropriateMessage {
+                expect_types: vec![ContentType::Alert],
+                got_type: ContentType::Handshake,
+            },
+            TLSError::InappropriateHandshakeMessage {
+                expect_types: vec![HandshakeType::ClientHello, HandshakeType::Finished],
+                got_type: HandshakeType::ServerHello,
+            },
+            TLSError::CorruptMessage,
+            TLSError::CorruptMessagePayload(ContentType::Alert),
+            TLSError::NoCertificatesPresented,
+            TLSError::DecryptError,
+            TLSError::PeerIncompatibleError("no tls1.2".to_string()),
+            TLSError::PeerMisbehavedError("inconsistent something".to_string()),
+            TLSError::AlertReceived(AlertDescription::ExportRestriction),
+            TLSError::WebPKIError(webpki::Error::ExtensionValueInvalid),
+            TLSError::InvalidSCT(sct::Error::MalformedSCT),
+            TLSError::General("undocumented error".to_string()),
+            TLSError::FailedToGetCurrentTime,
+            TLSError::HandshakeNotComplete,
+            TLSError::PeerSentOversizedRecord,
+            TLSError::NoApplicationProtocol,
+        ];
 
         for err in all {
             println!("{:?}:", err);
-            println!("  desc '{}'", err.description());
             println!("  fmt '{}'", err);
         }
     }

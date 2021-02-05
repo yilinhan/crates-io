@@ -38,6 +38,24 @@ impl ::Clone for timezone {
     }
 }
 
+impl siginfo_t {
+    pub unsafe fn si_addr(&self) -> *mut ::c_void {
+        self.si_addr
+    }
+
+    pub unsafe fn si_pid(&self) -> ::pid_t {
+        self.si_pid
+    }
+
+    pub unsafe fn si_uid(&self) -> ::uid_t {
+        self.si_uid
+    }
+
+    pub unsafe fn si_status(&self) -> ::c_int {
+        self.si_status
+    }
+}
+
 s! {
     pub struct in_addr {
         pub s_addr: ::in_addr_t,
@@ -790,7 +808,7 @@ pub const IFF_AUTO_CONFIGURED: ::c_int = 0x2000;
 pub const IFF_CONFIGURING: ::c_int = 0x4000;
 pub const IFF_MULTICAST: ::c_int = 0x8000; // supports multicast
 
-pub const AF_UNSEC: ::c_int = 0;
+pub const AF_UNSPEC: ::c_int = 0;
 pub const AF_INET: ::c_int = 1;
 pub const AF_APPLETALK: ::c_int = 2;
 pub const AF_ROUTE: ::c_int = 3;
@@ -962,6 +980,10 @@ pub const _SC_TIMER_MAX: ::c_int = 57;
 pub const _SC_TIMERS: ::c_int = 58;
 pub const _SC_CPUTIME: ::c_int = 59;
 pub const _SC_THREAD_CPUTIME: ::c_int = 60;
+pub const _SC_HOST_NAME_MAX: ::c_int = 61;
+pub const _SC_REGEXP: ::c_int = 62;
+pub const _SC_SYMLOOP_MAX: ::c_int = 63;
+pub const _SC_SHELL: ::c_int = 64;
 
 pub const PTHREAD_STACK_MIN: ::size_t = 8192;
 
@@ -1036,6 +1058,13 @@ pub const WCONTINUED: ::c_int = 0x04;
 pub const WEXITED: ::c_int = 0x08;
 pub const WSTOPPED: ::c_int = 0x10;
 pub const WNOWAIT: ::c_int = 0x20;
+
+pub const CLD_EXITED: ::c_int = 60;
+pub const CLD_KILLED: ::c_int = 61;
+pub const CLD_DUMPED: ::c_int = 62;
+pub const CLD_TRAPPED: ::c_int = 63;
+pub const CLD_STOPPED: ::c_int = 64;
+pub const CLD_CONTINUED: ::c_int = 65;
 
 pub const P_ALL: idtype_t = 0;
 pub const P_PID: idtype_t = 1;
@@ -1206,6 +1235,10 @@ pub const TIOCCBRK: ::c_int = TCGETA + 21;
 pub const TIOCMBIS: ::c_int = TCGETA + 22;
 pub const TIOCMBIC: ::c_int = TCGETA + 23;
 
+pub const PRIO_PROCESS: ::c_int = 0;
+pub const PRIO_PGRP: ::c_int = 1;
+pub const PRIO_USER: ::c_int = 2;
+
 f! {
     pub fn FD_CLR(fd: ::c_int, set: *mut fd_set) -> () {
         let fd = fd as usize;
@@ -1232,37 +1265,39 @@ f! {
             *slot = 0;
         }
     }
+}
 
-    pub fn WIFEXITED(status: ::c_int) -> bool {
+safe_f! {
+    pub {const} fn WIFEXITED(status: ::c_int) -> bool {
         (status & !0xff) == 0
     }
 
-    pub fn WEXITSTATUS(status: ::c_int) -> ::c_int {
+    pub {const} fn WEXITSTATUS(status: ::c_int) -> ::c_int {
         status & 0xff
     }
 
-    pub fn WIFSIGNALED(status: ::c_int) -> bool {
+    pub {const} fn WIFSIGNALED(status: ::c_int) -> bool {
         ((status >> 8) & 0xff) != 0
     }
 
-    pub fn WTERMSIG(status: ::c_int) -> ::c_int {
+    pub {const} fn WTERMSIG(status: ::c_int) -> ::c_int {
         (status >> 8) & 0xff
     }
 
-    pub fn WIFSTOPPED(status: ::c_int) -> bool {
+    pub {const} fn WIFSTOPPED(status: ::c_int) -> bool {
         ((status >> 16) & 0xff) != 0
     }
 
-    pub fn WSTOPSIG(status: ::c_int) -> ::c_int {
+    pub {const} fn WSTOPSIG(status: ::c_int) -> ::c_int {
         (status >> 16) & 0xff
     }
 
     // actually WIFCORED, but this is used everywhere else
-    pub fn WCOREDUMP(status: ::c_int) -> bool {
+    pub {const} fn WCOREDUMP(status: ::c_int) -> bool {
         (status & 0x10000) != 0
     }
 
-    pub fn WIFCONTINUED(status: ::c_int) -> bool {
+    pub {const} fn WIFCONTINUED(status: ::c_int) -> bool {
         (status & 0x20000) != 0
     }
 }
@@ -1270,6 +1305,20 @@ f! {
 extern "C" {
     pub fn getrlimit(resource: ::c_int, rlim: *mut ::rlimit) -> ::c_int;
     pub fn setrlimit(resource: ::c_int, rlim: *const ::rlimit) -> ::c_int;
+    pub fn getpriority(which: ::c_int, who: id_t) -> ::c_int;
+    pub fn setpriority(
+        which: ::c_int,
+        who: id_t,
+        priority: ::c_int,
+    ) -> ::c_int;
+
+    pub fn utimensat(
+        fd: ::c_int,
+        path: *const ::c_char,
+        times: *const ::timespec,
+        flag: ::c_int,
+    ) -> ::c_int;
+    pub fn futimens(fd: ::c_int, times: *const ::timespec) -> ::c_int;
     pub fn strerror_r(
         errnum: ::c_int,
         buf: *mut c_char,
@@ -1394,7 +1443,6 @@ extern "C" {
         addrlen: *mut ::socklen_t,
     ) -> ::ssize_t;
     pub fn mkstemps(template: *mut ::c_char, suffixlen: ::c_int) -> ::c_int;
-    pub fn futimes(fd: ::c_int, times: *const ::timeval) -> ::c_int;
     pub fn lutimes(file: *const ::c_char, times: *const ::timeval) -> ::c_int;
     pub fn nl_langinfo(item: ::nl_item) -> *mut ::c_char;
 
@@ -1430,7 +1478,6 @@ extern "C" {
         argv: *const *const ::c_char,
         environment: *const *const ::c_char,
     ) -> ::c_int;
-    #[cfg_attr(target_os = "solaris", link_name = "__posix_getgrgid_r")]
     pub fn getgrgid_r(
         gid: ::gid_t,
         grp: *mut ::group,
@@ -1438,15 +1485,9 @@ extern "C" {
         buflen: ::size_t,
         result: *mut *mut ::group,
     ) -> ::c_int;
-    #[cfg_attr(
-        all(target_os = "macos", target_arch = "x86"),
-        link_name = "sigaltstack$UNIX2003"
-    )]
-    #[cfg_attr(target_os = "netbsd", link_name = "__sigaltstack14")]
     pub fn sigaltstack(ss: *const stack_t, oss: *mut stack_t) -> ::c_int;
     pub fn sem_close(sem: *mut sem_t) -> ::c_int;
     pub fn getdtablesize() -> ::c_int;
-    #[cfg_attr(target_os = "solaris", link_name = "__posix_getgrnam_r")]
     pub fn getgrnam_r(
         name: *const ::c_char,
         grp: *mut ::group,
@@ -1454,10 +1495,6 @@ extern "C" {
         buflen: ::size_t,
         result: *mut *mut ::group,
     ) -> ::c_int;
-    #[cfg_attr(
-        all(target_os = "macos", target_arch = "x86"),
-        link_name = "pthread_sigmask$UNIX2003"
-    )]
     pub fn pthread_sigmask(
         how: ::c_int,
         set: *const sigset_t,
@@ -1468,8 +1505,6 @@ extern "C" {
     pub fn pthread_kill(thread: ::pthread_t, sig: ::c_int) -> ::c_int;
     pub fn sem_unlink(name: *const ::c_char) -> ::c_int;
     pub fn daemon(nochdir: ::c_int, noclose: ::c_int) -> ::c_int;
-    #[cfg_attr(target_os = "netbsd", link_name = "__getpwnam_r50")]
-    #[cfg_attr(target_os = "solaris", link_name = "__posix_getpwnam_r")]
     pub fn getpwnam_r(
         name: *const ::c_char,
         pwd: *mut passwd,
@@ -1477,8 +1512,6 @@ extern "C" {
         buflen: ::size_t,
         result: *mut *mut passwd,
     ) -> ::c_int;
-    #[cfg_attr(target_os = "netbsd", link_name = "__getpwuid_r50")]
-    #[cfg_attr(target_os = "solaris", link_name = "__posix_getpwuid_r")]
     pub fn getpwuid_r(
         uid: ::uid_t,
         pwd: *mut passwd,
@@ -1486,11 +1519,6 @@ extern "C" {
         buflen: ::size_t,
         result: *mut *mut passwd,
     ) -> ::c_int;
-    #[cfg_attr(
-        all(target_os = "macos", target_arch = "x86"),
-        link_name = "sigwait$UNIX2003"
-    )]
-    #[cfg_attr(target_os = "solaris", link_name = "__posix_sigwait")]
     pub fn sigwait(set: *const sigset_t, sig: *mut ::c_int) -> ::c_int;
     pub fn pthread_atfork(
         prepare: ::Option<unsafe extern "C" fn()>,
@@ -1498,10 +1526,6 @@ extern "C" {
         child: ::Option<unsafe extern "C" fn()>,
     ) -> ::c_int;
     pub fn getgrgid(gid: ::gid_t) -> *mut ::group;
-    #[cfg_attr(
-        all(target_os = "macos", target_arch = "x86"),
-        link_name = "popen$UNIX2003"
-    )]
     pub fn popen(command: *const c_char, mode: *const c_char) -> *mut ::FILE;
     pub fn openpty(
         amaster: *mut ::c_int,

@@ -322,7 +322,7 @@ impl<'t, 'p> Visitor for TranslatorI<'t, 'p> {
                         ast.negated,
                         &mut cls,
                     )?;
-                    if cls.iter().next().is_none() {
+                    if cls.ranges().is_empty() {
                         return Err(self.error(
                             ast.span,
                             ErrorKind::EmptyClassNotAllowed,
@@ -337,7 +337,7 @@ impl<'t, 'p> Visitor for TranslatorI<'t, 'p> {
                         ast.negated,
                         &mut cls,
                     )?;
-                    if cls.iter().next().is_none() {
+                    if cls.ranges().is_empty() {
                         return Err(self.error(
                             ast.span,
                             ErrorKind::EmptyClassNotAllowed,
@@ -844,6 +844,11 @@ impl<'t, 'p> TranslatorI<'t, 'p> {
                 ast_class.negated,
                 class,
             )?;
+            if class.ranges().is_empty() {
+                let err = self
+                    .error(ast_class.span, ErrorKind::EmptyClassNotAllowed);
+                return Err(err);
+            }
         }
         result
     }
@@ -2318,6 +2323,21 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "unicode-gencat")]
+    fn class_unicode_any_empty() {
+        assert_eq!(
+            t_err(r"\P{any}"),
+            TestError {
+                kind: hir::ErrorKind::EmptyClassNotAllowed,
+                span: Span::new(
+                    Position::new(0, 1, 1),
+                    Position::new(7, 1, 8)
+                ),
+            }
+        );
+    }
+
+    #[test]
     #[cfg(not(feature = "unicode-age"))]
     fn class_unicode_age_disabled() {
         assert_eq!(
@@ -3105,13 +3125,13 @@ mod tests {
     #[test]
     fn analysis_is_literal() {
         // Positive examples.
-        assert!(t(r"").is_literal());
         assert!(t(r"a").is_literal());
         assert!(t(r"ab").is_literal());
         assert!(t(r"abc").is_literal());
         assert!(t(r"(?m)abc").is_literal());
 
         // Negative examples.
+        assert!(!t(r"").is_literal());
         assert!(!t(r"^").is_literal());
         assert!(!t(r"a|b").is_literal());
         assert!(!t(r"(a)").is_literal());
@@ -3124,7 +3144,6 @@ mod tests {
     #[test]
     fn analysis_is_alternation_literal() {
         // Positive examples.
-        assert!(t(r"").is_alternation_literal());
         assert!(t(r"a").is_alternation_literal());
         assert!(t(r"ab").is_alternation_literal());
         assert!(t(r"abc").is_alternation_literal());
@@ -3135,6 +3154,7 @@ mod tests {
         assert!(t(r"foo|bar|baz").is_alternation_literal());
 
         // Negative examples.
+        assert!(!t(r"").is_alternation_literal());
         assert!(!t(r"^").is_alternation_literal());
         assert!(!t(r"(a)").is_alternation_literal());
         assert!(!t(r"a+").is_alternation_literal());

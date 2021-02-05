@@ -1,5 +1,8 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
+use inlinable_string::InlinableString;
+
+use crate::input::{Show, Input, Debugger, ParserInfo};
+use crate::macros::is_parse_debug;
 
 type Index = usize;
 
@@ -64,93 +67,109 @@ impl<T> Tree<T> {
     }
 }
 
-struct Info {
-    name: &'static str,
-    success: Option<bool>,
-    start_context: Option<String>,
-    end_context: Option<String>,
-}
-
-impl Info {
-    fn new(name: &'static str, start_context: Option<String>) -> Info {
-        Info { name, start_context, success: None, end_context: None }
-    }
-}
-
-thread_local! {
-    #[doc(hidden)]
-    static PARSE_TREE: RefCell<Tree<Info>> = RefCell::new(Tree::new());
-}
-
-fn debug_print(sibling_map: &mut Vec<bool>, node: Index) {
-    let parent_count = sibling_map.len();
-    for (i, &has_siblings) in sibling_map.iter().enumerate() {
-        if i < parent_count - 1 {
-            match has_siblings {
-                true => print!(" │   "),
-                false => print!("     ")
-            }
-        } else {
-            match has_siblings {
-                true => print!(" ├── "),
-                false => print!(" └── ")
+impl Tree<Info> {
+    fn debug_print(&self, sibling_map: &mut Vec<bool>, node: Index) {
+        let parent_count = sibling_map.len();
+        for (i, &has_siblings) in sibling_map.iter().enumerate() {
+            if i < parent_count - 1 {
+                match has_siblings {
+                    true => print!(" │   "),
+                    false => print!("     ")
+                }
+            } else {
+                match has_siblings {
+                    true => print!(" ├── "),
+                    false => print!(" └── ")
+                }
             }
         }
-    }
 
-    PARSE_TREE.with(|key| {
-        let tree = key.borrow();
-        let info = tree.get(node);
+        let info = self.get(node);
         let success = match info.success {
             Some(true) => " ✓",
             Some(false) => " ✗",
             None => ""
         };
 
-        let ctxt = match (&info.start_context, &info.end_context) {
-            (&Some(ref a), &Some(ref b)) => format!(" [{}] - [{}]", a, b),
-            _ => "".into()
+        #[cfg(feature = "color")]
+        let color = match info.success {
+            Some(true) => ::yansi::Color::Green,
+            Some(false) => ::yansi::Color::Red,
+            None => ::yansi::Color::Unset,
         };
 
-        println!("{}{}{}", info.name, success, ctxt);
-        let children = tree.get_children(node);
+        #[cfg(feature = "color")]
+        println!("{} ({})",
+            color.paint(format!("{}{}", info.parser.name, success)),
+            info.context);
+
+        #[cfg(not(feature = "color"))]
+        println!("{}{} ({})", info.name, success, info.context);
+
+        let children = self.get_children(node);
         let num_children = children.len();
         for (i, &child) in children.iter().enumerate() {
             let have_siblings = i != (num_children - 1);
             sibling_map.push(have_siblings);
-            debug_print(sibling_map, child);
+            self.debug_print(sibling_map, child);
             sibling_map.pop();
         }
-    });
-}
-
-#[doc(hidden)]
-pub fn parser_entry(name: &'static str, ctxt: Option<String>) {
-    if is_debug!() {
-        PARSE_TREE.with(|key| key.borrow_mut().push(Info::new(name, ctxt)));
     }
 }
 
-#[doc(hidden)]
-pub fn parser_exit(_: &'static str, success: bool, ctxt: Option<String>) {
-    if is_debug!() {
-        let done = PARSE_TREE.with(|key| {
-            // FIXME: Record whether it was successful or not.
-            let mut tree = key.borrow_mut();
-            let index = tree.pop_level();
-            if let Some(last_node) = index {
-                let last = tree.get_mut(last_node);
-                last.success = Some(success);
-                last.end_context = ctxt;
-            }
+struct Info {
+    parser: ParserInfo,
+    context: InlinableString,
+    success: Option<bool>,
+}
 
-            index
-        });
+impl Info {
+    fn new(parser: ParserInfo) -> Self {
+        Info { parser, context: iformat!(), success: None }
+    }
+}
+
+pub struct TreeDebugger {
+    tree: Tree<Info>,
+}
+
+impl TreeDebugger {
+    pub fn new() -> Self {
+        Self { tree: Tree::new() }
+    }
+}
+
+impl<I: Input> Debugger<I> for TreeDebugger {
+    fn on_entry(&mut self, p: &ParserInfo) {
+        if !((p.raw && is_parse_debug!("full")) || (!p.raw && is_parse_debug!())) {
+            return;
+        }
+
+        self.tree.push(Info::new(*p));
+    }
+
+    fn on_exit(&mut self, p: &ParserInfo, ok: bool, ctxt: I::Context) {
+        if !((p.raw && is_parse_debug!("full")) || (!p.raw && is_parse_debug!())) {
+            return;
+        }
+
+        let index = self.tree.pop_level();
+        if let Some(last_node) = index {
+            let last = self.tree.get_mut(last_node);
+            last.success = Some(ok);
+            last.context = iformat!("{}", &ctxt as &dyn Show);
+        }
 
         // We've reached the end. Print the whole thing and clear the tree.
-        if let Some(0) = done {
-            debug_print(&mut vec![], 0);
-            PARSE_TREE.with(|key| key.borrow_mut().clear());
+        if let Some(0) = index {
+            #[cfg(feature = "color")] {
+                if cfg!(windows) && !::yansi::Paint::enable_windows_ascii() {
+                    ::yansi::Paint::disable();
+                }
+            }
+
+            self.tree.debug_print(&mut vec![], 0);
+            self.tree.clear();
         }
     }
 }

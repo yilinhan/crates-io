@@ -1,4 +1,5 @@
 use crate::io::blocking::Blocking;
+use crate::io::stdio_common::SplitByUtf8BoundaryIfWindows;
 use crate::io::AsyncWrite;
 
 use std::io;
@@ -35,7 +36,7 @@ cfg_io_std! {
     /// ```
     #[derive(Debug)]
     pub struct Stderr {
-        std: Blocking<std::io::Stderr>,
+        std: SplitByUtf8BoundaryIfWindows<Blocking<std::io::Stderr>>,
     }
 
     /// Constructs a new handle to the standard error of the current process.
@@ -59,7 +60,7 @@ cfg_io_std! {
     ///
     /// #[tokio::main]
     /// async fn main() -> io::Result<()> {
-    ///     let mut stderr = io::stdout();
+    ///     let mut stderr = io::stderr();
     ///     stderr.write_all(b"Print some error here.").await?;
     ///     Ok(())
     /// }
@@ -67,8 +68,22 @@ cfg_io_std! {
     pub fn stderr() -> Stderr {
         let std = io::stderr();
         Stderr {
-            std: Blocking::new(std),
+            std: SplitByUtf8BoundaryIfWindows::new(Blocking::new(std)),
         }
+    }
+}
+
+#[cfg(unix)]
+impl std::os::unix::io::AsRawFd for Stderr {
+    fn as_raw_fd(&self) -> std::os::unix::io::RawFd {
+        std::io::stderr().as_raw_fd()
+    }
+}
+
+#[cfg(windows)]
+impl std::os::windows::io::AsRawHandle for Stderr {
+    fn as_raw_handle(&self) -> std::os::windows::io::RawHandle {
+        std::io::stderr().as_raw_handle()
     }
 }
 

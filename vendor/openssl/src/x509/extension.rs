@@ -33,6 +33,12 @@ pub struct BasicConstraints {
     pathlen: Option<u32>,
 }
 
+impl Default for BasicConstraints {
+    fn default() -> BasicConstraints {
+        BasicConstraints::new()
+    }
+}
+
 impl BasicConstraints {
     /// Construct a new `BasicConstraints` extension.
     pub fn new() -> BasicConstraints {
@@ -93,6 +99,12 @@ pub struct KeyUsage {
     crl_sign: bool,
     encipher_only: bool,
     decipher_only: bool,
+}
+
+impl Default for KeyUsage {
+    fn default() -> KeyUsage {
+        KeyUsage::new()
+    }
 }
 
 impl KeyUsage {
@@ -228,6 +240,12 @@ pub struct ExtendedKeyUsage {
     other: Vec<String>,
 }
 
+impl Default for ExtendedKeyUsage {
+    fn default() -> ExtendedKeyUsage {
+        ExtendedKeyUsage::new()
+    }
+}
+
 impl ExtendedKeyUsage {
     /// Construct a new `ExtendedKeyUsage` extension.
     pub fn new() -> ExtendedKeyUsage {
@@ -269,6 +287,12 @@ impl ExtendedKeyUsage {
     /// Sets the `codeSigning` flag to `true`.
     pub fn code_signing(&mut self) -> &mut ExtendedKeyUsage {
         self.code_signing = true;
+        self
+    }
+
+    /// Sets the `emailProtection` flag to `true`.
+    pub fn email_protection(&mut self) -> &mut ExtendedKeyUsage {
+        self.email_protection = true;
         self
     }
 
@@ -354,6 +378,12 @@ pub struct SubjectKeyIdentifier {
     critical: bool,
 }
 
+impl Default for SubjectKeyIdentifier {
+    fn default() -> SubjectKeyIdentifier {
+        SubjectKeyIdentifier::new()
+    }
+}
+
 impl SubjectKeyIdentifier {
     /// Construct a new `SubjectKeyIdentifier` extension.
     pub fn new() -> SubjectKeyIdentifier {
@@ -382,6 +412,12 @@ pub struct AuthorityKeyIdentifier {
     critical: bool,
     keyid: Option<bool>,
     issuer: Option<bool>,
+}
+
+impl Default for AuthorityKeyIdentifier {
+    fn default() -> AuthorityKeyIdentifier {
+        AuthorityKeyIdentifier::new()
+    }
 }
 
 impl AuthorityKeyIdentifier {
@@ -436,6 +472,12 @@ impl AuthorityKeyIdentifier {
 pub struct SubjectAlternativeName {
     critical: bool,
     names: Vec<String>,
+}
+
+impl Default for SubjectAlternativeName {
+    fn default() -> SubjectAlternativeName {
+        SubjectAlternativeName::new()
+    }
 }
 
 impl SubjectAlternativeName {

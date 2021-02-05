@@ -1,6 +1,6 @@
+use crate::key;
 use crate::msgs::codec;
 use crate::msgs::codec::{Codec, Reader};
-use crate::key;
 /// An externally length'd payload
 #[derive(Debug, Clone, PartialEq)]
 pub struct Payload(pub Vec<u8>);
@@ -22,12 +22,6 @@ impl Payload {
 
     pub fn empty() -> Payload {
         Payload::new(Vec::new())
-    }
-
-    pub fn from_slice(data: &[u8]) -> Payload {
-        let mut v = Vec::with_capacity(data.len());
-        v.extend_from_slice(data);
-        Payload(v)
     }
 }
 
@@ -52,10 +46,6 @@ pub struct PayloadU24(pub Vec<u8>);
 impl PayloadU24 {
     pub fn new(bytes: Vec<u8>) -> PayloadU24 {
         PayloadU24(bytes)
-    }
-
-    pub fn empty() -> PayloadU24 {
-        PayloadU24::new(Vec::new())
     }
 }
 
@@ -118,7 +108,9 @@ impl PayloadU8 {
         PayloadU8(Vec::new())
     }
 
-    pub fn into_inner(self) -> Vec<u8> { self.0 }
+    pub fn into_inner(self) -> Vec<u8> {
+        self.0
+    }
 }
 
 impl Codec for PayloadU8 {

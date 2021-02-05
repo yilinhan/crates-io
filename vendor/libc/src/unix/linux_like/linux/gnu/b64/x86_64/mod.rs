@@ -569,6 +569,25 @@ pub const SO_BPF_EXTENSIONS: ::c_int = 48;
 pub const SO_INCOMING_CPU: ::c_int = 49;
 pub const SO_ATTACH_BPF: ::c_int = 50;
 pub const SO_DETACH_BPF: ::c_int = SO_DETACH_FILTER;
+pub const SO_ATTACH_REUSEPORT_CBPF: ::c_int = 51;
+pub const SO_ATTACH_REUSEPORT_EBPF: ::c_int = 52;
+pub const SO_CNX_ADVICE: ::c_int = 53;
+pub const SCM_TIMESTAMPING_OPT_STATS: ::c_int = 54;
+pub const SO_MEMINFO: ::c_int = 55;
+pub const SO_INCOMING_NAPI_ID: ::c_int = 56;
+pub const SO_COOKIE: ::c_int = 57;
+pub const SCM_TIMESTAMPING_PKTINFO: ::c_int = 58;
+pub const SO_PEERGROUPS: ::c_int = 59;
+pub const SO_ZEROCOPY: ::c_int = 60;
+pub const SO_TXTIME: ::c_int = 61;
+pub const SCM_TXTIME: ::c_int = SO_TXTIME;
+pub const SO_BINDTOIFINDEX: ::c_int = 62;
+pub const SO_TIMESTAMP_NEW: ::c_int = 63;
+pub const SO_TIMESTAMPNS_NEW: ::c_int = 64;
+pub const SO_TIMESTAMPING_NEW: ::c_int = 65;
+pub const SO_RCVTIMEO_NEW: ::c_int = 66;
+pub const SO_SNDTIMEO_NEW: ::c_int = 67;
+pub const SO_DETACH_REUSEPORT_BPF: ::c_int = 68;
 
 pub const SOCK_STREAM: ::c_int = 1;
 pub const SOCK_DGRAM: ::c_int = 2;
@@ -701,7 +720,7 @@ pub const MAP_EXECUTABLE: ::c_int = 0x01000;
 pub const MAP_POPULATE: ::c_int = 0x08000;
 pub const MAP_NONBLOCK: ::c_int = 0x010000;
 pub const MAP_STACK: ::c_int = 0x020000;
-pub const MAP_SYNC : ::c_int = 0x080000;
+pub const MAP_SYNC: ::c_int = 0x080000;
 
 pub const EDEADLOCK: ::c_int = 35;
 pub const EUCLEAN: ::c_int = 117;
@@ -721,6 +740,8 @@ pub const PTRACE_SETFPXREGS: ::c_uint = 19;
 pub const PTRACE_GETREGS: ::c_uint = 12;
 pub const PTRACE_SETREGS: ::c_uint = 13;
 pub const PTRACE_PEEKSIGINFO_SHARED: ::c_uint = 1;
+pub const PTRACE_SYSEMU: ::c_uint = 31;
+pub const PTRACE_SYSEMU_SINGLESTEP: ::c_uint = 32;
 
 pub const MCL_CURRENT: ::c_int = 0x0001;
 pub const MCL_FUTURE: ::c_int = 0x0002;
@@ -839,6 +860,8 @@ pub const TIOCOUTQ: ::c_ulong = 0x5411;
 pub const TIOCGWINSZ: ::c_ulong = 0x5413;
 pub const TIOCSWINSZ: ::c_ulong = 0x5414;
 pub const FIONREAD: ::c_ulong = 0x541B;
+pub const TIOCSBRK: ::c_ulong = 0x5427;
+pub const TIOCCBRK: ::c_ulong = 0x5428;
 
 // offsets in user_regs_structs, from sys/reg.h
 pub const R15: ::c_int = 0;

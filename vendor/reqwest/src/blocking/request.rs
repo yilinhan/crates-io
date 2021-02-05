@@ -3,6 +3,7 @@ use std::convert::TryFrom;
 use std::time::Duration;
 
 use base64::encode;
+use http::{Request as HttpRequest, request::Parts};
 use serde::Serialize;
 #[cfg(feature = "json")]
 use serde_json;
@@ -21,7 +22,10 @@ pub struct Request {
 }
 
 /// A builder to construct the properties of a `Request`.
+///
+/// To construct a `RequestBuilder`, refer to the `Client` documentation.
 #[derive(Debug)]
+#[must_use = "RequestBuilder does nothing until you 'send' it"]
 pub struct RequestBuilder {
     client: Client,
     request: crate::Result<Request>,
@@ -163,7 +167,18 @@ impl RequestBuilder {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn header<K, V>(mut self, key: K, value: V) -> RequestBuilder
+    pub fn header<K, V>(self, key: K, value: V) -> RequestBuilder
+    where
+        HeaderName: TryFrom<K>,
+        HeaderValue: TryFrom<V>,
+        <HeaderName as TryFrom<K>>::Error: Into<http::Error>,
+        <HeaderValue as TryFrom<V>>::Error: Into<http::Error>,
+    {
+        self.header_sensitive(key, value, false)
+    }
+
+    /// Add a `Header` to this Request with ability to define if header_value is sensitive.
+    fn header_sensitive<K, V>(mut self, key: K, value: V, sensitive: bool) -> RequestBuilder
     where
         HeaderName: TryFrom<K>,
         HeaderValue: TryFrom<V>,
@@ -174,7 +189,8 @@ impl RequestBuilder {
         if let Ok(ref mut req) = self.request {
             match <HeaderName as TryFrom<K>>::try_from(key) {
                 Ok(key) => match <HeaderValue as TryFrom<V>>::try_from(value) {
-                    Ok(value) => {
+                    Ok(mut value) => {
+                        value.set_sensitive(sensitive);
                         req.headers_mut().append(key, value);
                     }
                     Err(e) => error = Some(crate::error::builder(e.into())),
@@ -215,7 +231,7 @@ impl RequestBuilder {
     /// ```
     pub fn headers(mut self, headers: crate::header::HeaderMap) -> RequestBuilder {
         if let Ok(ref mut req) = self.request {
-            async_impl::request::replace_headers(req.headers_mut(), headers);
+            crate::util::replace_headers(req.headers_mut(), headers);
         }
         self
     }
@@ -241,7 +257,7 @@ impl RequestBuilder {
             None => format!("{}:", username),
         };
         let header_value = format!("Basic {}", encode(&auth));
-        self.header(crate::header::AUTHORIZATION, &*header_value)
+        self.header_sensitive(crate::header::AUTHORIZATION, &*header_value, true)
     }
 
     /// Enable HTTP bearer authentication.
@@ -260,7 +276,7 @@ impl RequestBuilder {
         T: fmt::Display,
     {
         let header_value = format!("Bearer {}", token);
-        self.header(crate::header::AUTHORIZATION, &*header_value)
+        self.header_sensitive(crate::header::AUTHORIZATION, &*header_value, true)
     }
 
     /// Set the request body.
@@ -315,9 +331,9 @@ impl RequestBuilder {
 
     /// Enables a request timeout.
     ///
-    /// The timeout is applied from the when the request starts connecting
-    /// until the response body has finished. It affects only this request
-    /// and overrides the timeout configured using `ClientBuilder::timeout()`.
+    /// The timeout is applied from when the request starts connecting until the
+    /// response body has finished. It affects only this request and overrides
+    /// the timeout configured using `ClientBuilder::timeout()`.
     pub fn timeout(mut self, timeout: Duration) -> RequestBuilder {
         if let Ok(ref mut req) = self.request {
             *req.timeout_mut() = Some(timeout);
@@ -578,6 +594,28 @@ impl RequestBuilder {
     }
 }
 
+impl<T> TryFrom<HttpRequest<T>> for Request where T:Into<Body> {
+    type Error = crate::Error;
+
+    fn try_from(req: HttpRequest<T>) -> crate::Result<Self> {
+        let (parts, body) = req.into_parts();
+        let Parts {
+            method,
+            uri,
+            headers,
+            ..
+        } = parts;
+        let url = Url::parse(&uri.to_string())
+            .map_err(crate::error::builder)?;
+        let mut inner = async_impl::Request::new(method, url);
+        crate::util::replace_headers(inner.headers_mut(), headers);
+        Ok(Request {
+            body: Some(body.into()),
+            inner,
+        })
+    }
+}
+
 impl fmt::Debug for Request {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         fmt_request_fields(&mut f.debug_struct("Request"), self).finish()
@@ -595,6 +633,7 @@ fn fmt_request_fields<'a, 'b>(
 
 #[cfg(test)]
 mod tests {
+    use super::{HttpRequest, Request};
     use super::super::{body, Client};
     use crate::header::{HeaderMap, HeaderValue, ACCEPT, CONTENT_TYPE, HOST};
     use crate::Method;
@@ -603,6 +642,7 @@ mod tests {
     use serde_json;
     use serde_urlencoded;
     use std::collections::{BTreeMap, HashMap};
+    use std::convert::TryFrom;
 
     #[test]
     fn basic_get_request() {
@@ -922,5 +962,54 @@ mod tests {
 
         assert_eq!(req.url().as_str(), "https://localhost/");
         assert_eq!(req.headers()["authorization"], "Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==");
+    }
+
+    #[test]
+    fn convert_from_http_request() {
+        let http_request = HttpRequest::builder().method("GET")
+            .uri("http://localhost/")
+            .header("User-Agent", "my-awesome-agent/1.0")
+            .body("test test test")
+            .unwrap();
+        let req: Request = Request::try_from(http_request).unwrap();
+        assert_eq!(req.body().is_none(), false);
+        let test_data = b"test test test";
+        assert_eq!(req.body().unwrap().as_bytes(), Some(&test_data[..]));
+        let headers = req.headers();
+        assert_eq!(headers.get("User-Agent").unwrap(), "my-awesome-agent/1.0");
+        assert_eq!(req.method(), Method::GET);
+        assert_eq!(req.url().as_str(), "http://localhost/");
+    }
+
+    #[test]
+    fn test_basic_auth_sensitive_header() {
+        let client = Client::new();
+        let some_url = "https://localhost/";
+
+        let req = client
+            .get(some_url)
+            .basic_auth("Aladdin", Some("open sesame"))
+            .build()
+            .expect("request build");
+
+        assert_eq!(req.url().as_str(), "https://localhost/");
+        assert_eq!(req.headers()["authorization"], "Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==");
+        assert_eq!(req.headers()["authorization"].is_sensitive(), true);
+    }
+
+    #[test]
+    fn test_bearer_auth_sensitive_header() {
+        let client = Client::new();
+        let some_url = "https://localhost/";
+
+        let req = client
+            .get(some_url)
+            .bearer_auth("Hold my bear")
+            .build()
+            .expect("request build");
+
+        assert_eq!(req.url().as_str(), "https://localhost/");
+        assert_eq!(req.headers()["authorization"], "Bearer Hold my bear");
+        assert_eq!(req.headers()["authorization"].is_sensitive(), true);
     }
 }

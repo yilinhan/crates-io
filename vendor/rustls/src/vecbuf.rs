@@ -1,27 +1,7 @@
-use std::io::Read;
-use std::io;
 use std::cmp;
 use std::collections::VecDeque;
-use std::convert;
-
-/// This trait specifies rustls's precise requirements doing writes with
-/// vectored IO.
-///
-/// The purpose of vectored IO is to pass contigious output in many blocks
-/// to the kernel without either coalescing it in user-mode (by allocating
-/// and copying) or making many system calls.
-///
-/// We don't directly use types from the vecio crate because the traits
-/// don't compose well: the most useful trait (`Rawv`) is hard to test
-/// with (it can't be implemented without an FD) and implies a readable
-/// source too.  You will have to write a trivial adaptor struct which
-/// glues either `vecio::Rawv` or `vecio::Writev` to this trait.  See
-/// the rustls examples.
-pub trait WriteV {
-    /// Writes as much data from `vbytes` as possible, returning
-    /// the number of bytes written.
-    fn writev(&mut self, vbytes: &[&[u8]]) -> io::Result<usize>;
-}
+use std::io;
+use std::io::Read;
 
 /// This is a byte buffer that is built from a vector
 /// of byte vectors.  This avoids extra copies when
@@ -34,7 +14,10 @@ pub struct ChunkVecBuffer {
 
 impl ChunkVecBuffer {
     pub fn new() -> ChunkVecBuffer {
-        ChunkVecBuffer { chunks: VecDeque::new(), limit: 0 }
+        ChunkVecBuffer {
+            chunks: VecDeque::new(),
+            limit: 0,
+        }
     }
 
     /// Sets the upper limit on how many bytes this
@@ -69,7 +52,7 @@ impl ChunkVecBuffer {
         if self.limit == 0 {
             len
         } else {
-            let space =self.limit.saturating_sub(self.len());
+            let space = self.limit.saturating_sub(self.len());
             cmp::min(len, space)
         }
     }
@@ -105,7 +88,9 @@ impl ChunkVecBuffer {
         let mut offs = 0;
 
         while offs < buf.len() && !self.is_empty() {
-            let used = self.chunks[0].as_slice().read(&mut buf[offs..])?;
+            let used = self.chunks[0]
+                .as_slice()
+                .read(&mut buf[offs..])?;
 
             self.consume(used);
             offs += used;
@@ -132,23 +117,13 @@ impl ChunkVecBuffer {
             return Ok(0);
         }
 
-        let used = wr.write(&self.chunks[0])?;
-        self.consume(used);
-        Ok(used)
-    }
-
-    pub fn writev_to(&mut self, wr: &mut dyn WriteV) -> io::Result<usize> {
-        if self.is_empty() {
-            return Ok(0);
-        }
-
-        let used = {
-            let chunks = self.chunks.iter()
-                .map(convert::AsRef::as_ref)
-                .collect::<Vec<&[u8]>>();
-
-            wr.writev(&chunks)?
-        };
+        let used = wr.write_vectored(
+            &self
+                .chunks
+                .iter()
+                .map(|ch| io::IoSlice::new(ch))
+                .collect::<Vec<io::IoSlice>>(),
+        )?;
         self.consume(used);
         Ok(used)
     }
@@ -159,8 +134,7 @@ mod test {
     use super::ChunkVecBuffer;
 
     #[test]
-    fn short_append_copy_with_limit()
-    {
+    fn short_append_copy_with_limit() {
         let mut cvb = ChunkVecBuffer::new();
         cvb.set_limit(12);
         assert_eq!(cvb.append_limited_copy(b"hello"), 5);
@@ -170,7 +144,6 @@ mod test {
 
         let mut buf = [0u8; 12];
         assert_eq!(cvb.read(&mut buf).unwrap(), 12);
-        assert_eq!(buf.to_vec(),
-                   b"helloworldhe".to_vec());
+        assert_eq!(buf.to_vec(), b"helloworldhe".to_vec());
     }
 }

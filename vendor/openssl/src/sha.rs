@@ -56,6 +56,7 @@ use std::mem;
 /// SHA1 is known to be insecure - it should not be used unless required for
 /// compatibility with existing systems.
 #[inline]
+#[allow(deprecated)] // https://github.com/rust-lang/rust/issues/63566
 pub fn sha1(data: &[u8]) -> [u8; 20] {
     unsafe {
         let mut hash: [u8; 20] = mem::uninitialized();
@@ -66,6 +67,7 @@ pub fn sha1(data: &[u8]) -> [u8; 20] {
 
 /// Computes the SHA224 hash of some data.
 #[inline]
+#[allow(deprecated)] // https://github.com/rust-lang/rust/issues/63566
 pub fn sha224(data: &[u8]) -> [u8; 28] {
     unsafe {
         let mut hash: [u8; 28] = mem::uninitialized();
@@ -76,6 +78,7 @@ pub fn sha224(data: &[u8]) -> [u8; 28] {
 
 /// Computes the SHA256 hash of some data.
 #[inline]
+#[allow(deprecated)] // https://github.com/rust-lang/rust/issues/63566
 pub fn sha256(data: &[u8]) -> [u8; 32] {
     unsafe {
         let mut hash: [u8; 32] = mem::uninitialized();
@@ -86,6 +89,7 @@ pub fn sha256(data: &[u8]) -> [u8; 32] {
 
 /// Computes the SHA384 hash of some data.
 #[inline]
+#[allow(deprecated)] // https://github.com/rust-lang/rust/issues/63566
 pub fn sha384(data: &[u8]) -> [u8; 48] {
     unsafe {
         let mut hash: [u8; 48] = mem::uninitialized();
@@ -96,6 +100,7 @@ pub fn sha384(data: &[u8]) -> [u8; 48] {
 
 /// Computes the SHA512 hash of some data.
 #[inline]
+#[allow(deprecated)] // https://github.com/rust-lang/rust/issues/63566
 pub fn sha512(data: &[u8]) -> [u8; 64] {
     unsafe {
         let mut hash: [u8; 64] = mem::uninitialized();
@@ -113,9 +118,17 @@ pub fn sha512(data: &[u8]) -> [u8; 64] {
 #[derive(Clone)]
 pub struct Sha1(ffi::SHA_CTX);
 
+impl Default for Sha1 {
+    #[inline]
+    fn default() -> Sha1 {
+        Sha1::new()
+    }
+}
+
 impl Sha1 {
     /// Creates a new hasher.
     #[inline]
+    #[allow(deprecated)] // https://github.com/rust-lang/rust/issues/63566
     pub fn new() -> Sha1 {
         unsafe {
             let mut ctx = mem::uninitialized();
@@ -136,6 +149,7 @@ impl Sha1 {
 
     /// Returns the hash of the data.
     #[inline]
+    #[allow(deprecated)] // https://github.com/rust-lang/rust/issues/63566
     pub fn finish(mut self) -> [u8; 20] {
         unsafe {
             let mut hash: [u8; 20] = mem::uninitialized();
@@ -149,9 +163,17 @@ impl Sha1 {
 #[derive(Clone)]
 pub struct Sha224(ffi::SHA256_CTX);
 
+impl Default for Sha224 {
+    #[inline]
+    fn default() -> Sha224 {
+        Sha224::new()
+    }
+}
+
 impl Sha224 {
     /// Creates a new hasher.
     #[inline]
+    #[allow(deprecated)] // https://github.com/rust-lang/rust/issues/63566
     pub fn new() -> Sha224 {
         unsafe {
             let mut ctx = mem::uninitialized();
@@ -172,6 +194,7 @@ impl Sha224 {
 
     /// Returns the hash of the data.
     #[inline]
+    #[allow(deprecated)] // https://github.com/rust-lang/rust/issues/63566
     pub fn finish(mut self) -> [u8; 28] {
         unsafe {
             let mut hash: [u8; 28] = mem::uninitialized();
@@ -185,9 +208,17 @@ impl Sha224 {
 #[derive(Clone)]
 pub struct Sha256(ffi::SHA256_CTX);
 
+impl Default for Sha256 {
+    #[inline]
+    fn default() -> Sha256 {
+        Sha256::new()
+    }
+}
+
 impl Sha256 {
     /// Creates a new hasher.
     #[inline]
+    #[allow(deprecated)] // https://github.com/rust-lang/rust/issues/63566
     pub fn new() -> Sha256 {
         unsafe {
             let mut ctx = mem::uninitialized();
@@ -208,6 +239,7 @@ impl Sha256 {
 
     /// Returns the hash of the data.
     #[inline]
+    #[allow(deprecated)] // https://github.com/rust-lang/rust/issues/63566
     pub fn finish(mut self) -> [u8; 32] {
         unsafe {
             let mut hash: [u8; 32] = mem::uninitialized();
@@ -221,9 +253,17 @@ impl Sha256 {
 #[derive(Clone)]
 pub struct Sha384(ffi::SHA512_CTX);
 
+impl Default for Sha384 {
+    #[inline]
+    fn default() -> Sha384 {
+        Sha384::new()
+    }
+}
+
 impl Sha384 {
     /// Creates a new hasher.
     #[inline]
+    #[allow(deprecated)] // https://github.com/rust-lang/rust/issues/63566
     pub fn new() -> Sha384 {
         unsafe {
             let mut ctx = mem::uninitialized();
@@ -244,6 +284,7 @@ impl Sha384 {
 
     /// Returns the hash of the data.
     #[inline]
+    #[allow(deprecated)] // https://github.com/rust-lang/rust/issues/63566
     pub fn finish(mut self) -> [u8; 48] {
         unsafe {
             let mut hash: [u8; 48] = mem::uninitialized();
@@ -257,9 +298,17 @@ impl Sha384 {
 #[derive(Clone)]
 pub struct Sha512(ffi::SHA512_CTX);
 
+impl Default for Sha512 {
+    #[inline]
+    fn default() -> Sha512 {
+        Sha512::new()
+    }
+}
+
 impl Sha512 {
     /// Creates a new hasher.
     #[inline]
+    #[allow(deprecated)] // https://github.com/rust-lang/rust/issues/63566
     pub fn new() -> Sha512 {
         unsafe {
             let mut ctx = mem::uninitialized();
@@ -280,6 +329,7 @@ impl Sha512 {
 
     /// Returns the hash of the data.
     #[inline]
+    #[allow(deprecated)] // https://github.com/rust-lang/rust/issues/63566
     pub fn finish(mut self) -> [u8; 64] {
         unsafe {
             let mut hash: [u8; 64] = mem::uninitialized();

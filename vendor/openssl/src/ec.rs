@@ -15,22 +15,6 @@
 //! [`EcGroup`]: struct.EcGroup.html
 //! [`Nid`]: ../nid/struct.Nid.html
 //! [Eliptic Curve Cryptography]: https://wiki.openssl.org/index.php/Elliptic_Curve_Cryptography
-//!
-//! # Examples
-//!
-//! ```
-//! use openssl::ec::{EcGroup, EcPoint};
-//! use openssl::nid::Nid;
-//! use openssl::error::ErrorStack;
-//! fn get_ec_point() -> Result<EcPoint, ErrorStack> {
-//!    let group = EcGroup::from_curve_name(Nid::SECP224R1)?;
-//!    let point = EcPoint::new(&group)?;
-//!    Ok(point)
-//! }
-//! # fn main() {
-//! #    let _ = get_ec_point();
-//! # }
-//! ```
 use ffi;
 use foreign_types::{ForeignType, ForeignTypeRef};
 use libc::c_int;
@@ -41,6 +25,7 @@ use bn::{BigNumContextRef, BigNumRef};
 use error::ErrorStack;
 use nid::Nid;
 use pkey::{HasParams, HasPrivate, HasPublic, Params, Private, Public};
+use util::ForeignTypeRefExt;
 use {cvt, cvt_n, cvt_p, init};
 
 /// Compressed or Uncompressed conversion
@@ -246,7 +231,7 @@ impl EcGroupRef {
     pub fn generator(&self) -> &EcPointRef {
         unsafe {
             let ptr = ffi::EC_GROUP_get0_generator(self.as_ptr());
-            EcPointRef::from_ptr(ptr as *mut _)
+            EcPointRef::from_const_ptr(ptr)
         }
     }
 
@@ -347,6 +332,7 @@ impl EcPointRef {
         group: &EcGroupRef,
         q: &EcPointRef,
         m: &BigNumRef,
+        // FIXME should be &mut
         ctx: &BigNumContextRef,
     ) -> Result<(), ErrorStack> {
         unsafe {
@@ -367,6 +353,7 @@ impl EcPointRef {
         &mut self,
         group: &EcGroupRef,
         n: &BigNumRef,
+        // FIXME should be &mut
         ctx: &BigNumContextRef,
     ) -> Result<(), ErrorStack> {
         unsafe {
@@ -636,7 +623,7 @@ where
     pub fn private_key(&self) -> &BigNumRef {
         unsafe {
             let ptr = ffi::EC_KEY_get0_private_key(self.as_ptr());
-            BigNumRef::from_ptr(ptr as *mut _)
+            BigNumRef::from_const_ptr(ptr)
         }
     }
 }
@@ -647,14 +634,36 @@ where
 {
     /// Returns the public key.
     ///
-    /// OpenSSL documentation at [`EC_KEY_get0_pubic_key`]
+    /// OpenSSL documentation at [`EC_KEY_get0_public_key`]
     ///
-    /// [`EC_KEY_get0_pubic_key`]: https://www.openssl.org/docs/man1.1.0/crypto/EC_KEY_get0_public_key.html
+    /// [`EC_KEY_get0_public_key`]: https://www.openssl.org/docs/man1.1.0/crypto/EC_KEY_get0_public_key.html
     pub fn public_key(&self) -> &EcPointRef {
         unsafe {
             let ptr = ffi::EC_KEY_get0_public_key(self.as_ptr());
-            EcPointRef::from_ptr(ptr as *mut _)
+            EcPointRef::from_const_ptr(ptr)
         }
+    }
+
+    to_pem! {
+        /// Serialies the public key into a PEM-encoded SubjectPublicKeyInfo structure.
+        ///
+        /// The output will have a header of `-----BEGIN PUBLIC KEY-----`.
+        ///
+        /// This corresponds to [`PEM_write_bio_EC_PUBKEY`].
+        ///
+        /// [`PEM_write_bio_EC_PUBKEY`]: https://www.openssl.org/docs/man1.1.0/crypto/PEM_write_bio_EC_PUBKEY.html
+        public_key_to_pem,
+        ffi::PEM_write_bio_EC_PUBKEY
+    }
+
+    to_der! {
+        /// Serializes the public key into a DER-encoded SubjectPublicKeyInfo structure.
+        ///
+        /// This corresponds to [`i2d_EC_PUBKEY`].
+        ///
+        /// [`i2d_EC_PUBKEY`]: https://www.openssl.org/docs/man1.1.0/crypto/i2d_EC_PUBKEY.html
+        public_key_to_der,
+        ffi::i2d_EC_PUBKEY
     }
 }
 
@@ -670,7 +679,7 @@ where
     pub fn group(&self) -> &EcGroupRef {
         unsafe {
             let ptr = ffi::EC_KEY_get0_group(self.as_ptr());
-            EcGroupRef::from_ptr(ptr as *mut _)
+            EcGroupRef::from_const_ptr(ptr)
         }
     }
 
@@ -791,6 +800,30 @@ impl EcKey<Public> {
                     .map(|_| key)
                 })
         }
+    }
+
+    from_pem! {
+        /// Decodes a PEM-encoded SubjectPublicKeyInfo structure containing a EC key.
+        ///
+        /// The input should have a header of `-----BEGIN PUBLIC KEY-----`.
+        ///
+        /// This corresponds to [`PEM_read_bio_EC_PUBKEY`].
+        ///
+        /// [`PEM_read_bio_EC_PUBKEY`]: https://www.openssl.org/docs/man1.1.0/crypto/PEM_read_bio_EC_PUBKEY.html
+        public_key_from_pem,
+        EcKey<Public>,
+        ffi::PEM_read_bio_EC_PUBKEY
+    }
+
+    from_der! {
+        /// Decodes a DER-encoded SubjectPublicKeyInfo structure containing a EC key.
+        ///
+        /// This corresponds to [`d2i_EC_PUBKEY`].
+        ///
+        /// [`d2i_EC_PUBKEY`]: https://www.openssl.org/docs/man1.1.0/crypto/d2i_EC_PUBKEY.html
+        public_key_from_der,
+        EcKey<Public>,
+        ffi::d2i_EC_PUBKEY
     }
 }
 
@@ -917,6 +950,7 @@ mod test {
     }
 
     #[test]
+    #[allow(clippy::redundant_clone)]
     fn dup() {
         let group = EcGroup::from_curve_name(Nid::X9_62_PRIME256V1).unwrap();
         let key = EcKey::generate(&group).unwrap();
@@ -959,7 +993,7 @@ mod test {
         let mut ctx = BigNumContext::new().unwrap();
         let mut public_key = EcPoint::new(&group).unwrap();
         public_key
-            .mul_generator(&group, key.private_key(), &mut ctx)
+            .mul_generator(&group, key.private_key(), &ctx)
             .unwrap();
         assert!(public_key.eq(&group, key.public_key(), &mut ctx).unwrap());
     }
@@ -971,7 +1005,7 @@ mod test {
         let one = BigNum::from_u32(1).unwrap();
         let mut ctx = BigNumContext::new().unwrap();
         let mut ecp = EcPoint::new(&group).unwrap();
-        ecp.mul_generator(&group, &one, &mut ctx).unwrap();
+        ecp.mul_generator(&group, &one, &ctx).unwrap();
         assert!(ecp.eq(&group, gen, &mut ctx).unwrap());
     }
 
@@ -998,9 +1032,8 @@ mod test {
 
         let dup_key =
             EcKey::from_private_components(&group, key.private_key(), key.public_key()).unwrap();
-        let res = dup_key.check_key().unwrap();
+        dup_key.check_key().unwrap();
 
-        assert!(res == ());
         assert!(key.private_key() == dup_key.private_key());
     }
 

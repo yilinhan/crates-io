@@ -13,7 +13,7 @@
 //!```toml,ignore
 //!# Cargo.toml
 //![dependencies]
-//!winreg = "0.6"
+//!winreg = "0.7"
 //!```
 //!
 //!```no_run
@@ -244,7 +244,7 @@ impl RegKey {
     /// let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     /// ```
     pub fn predef(hkey: HKEY) -> RegKey {
-        RegKey { hkey: hkey }
+        RegKey { hkey }
     }
 
     /// Return inner winapi HKEY of a key:
@@ -654,13 +654,12 @@ impl RegKey {
     /// ```
     pub fn delete_subkey_all<P: AsRef<OsStr>>(&self, path: P) -> io::Result<()> {
         let c_path;
-        let path_ptr;
-        if path.as_ref().is_empty() {
-            path_ptr = ptr::null();
+        let path_ptr = if path.as_ref().is_empty() {
+            ptr::null()
         } else {
             c_path = to_utf16(path);
-            path_ptr = c_path.as_ptr();
-        }
+            c_path.as_ptr()
+        };
         match unsafe {
             winapi_reg::RegDeleteTreeW(
                 self.hkey,
@@ -877,8 +876,8 @@ impl RegKey {
     /// ```
     #[cfg(feature = "serialization-serde")]
     pub fn encode<T: serde::Serialize>(&self, value: &T) -> encoder::EncodeResult<()> {
-        let mut encoder = try!(encoder::Encoder::from_key(self));
-        try!(value.serialize(&mut encoder));
+        let mut encoder = encoder::Encoder::from_key(self)?;
+        value.serialize(&mut encoder)?;
         encoder.commit()
     }
 
@@ -919,7 +918,7 @@ impl RegKey {
     /// ```
     #[cfg(feature = "serialization-serde")]
     pub fn decode<'de, T: serde::Deserialize<'de>>(&self) -> decoder::DecodeResult<T> {
-        let mut decoder = try!(decoder::Decoder::from_key(self));
+        let mut decoder = decoder::Decoder::from_key(self)?;
         T::deserialize(&mut decoder)
     }
 
@@ -1032,6 +1031,11 @@ impl<'key> Iterator for EnumKeys<'key> {
             e @ None => e,
         }
     }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.index += n as DWORD;
+        self.next()
+    }
 }
 
 /// Iterator over values
@@ -1051,6 +1055,11 @@ impl<'key> Iterator for EnumValues<'key> {
             }
             e @ None => e,
         }
+    }
+
+    fn nth(&mut self, n: usize) -> Option<Self::Item> {
+        self.index += n as DWORD;
+        self.next()
     }
 }
 
@@ -1224,7 +1233,7 @@ mod test {
     fn test_u32_value() {
         with_key!(key, "U32Value" => {
             let name = "RustU32Val";
-            let val1 = 1234567890u32;
+            let val1 = 1_234_567_890u32;
             key.set_value(name, &val1).unwrap();
             let val2: u32 = key.get_value(name).unwrap();
             assert_eq!(val1, val2);
@@ -1235,7 +1244,7 @@ mod test {
     fn test_u64_value() {
         with_key!(key, "U64Value" => {
             let name = "RustU64Val";
-            let val1 = 1234567891011121314u64;
+            let val1 = 1_234_567_891_011_121_314u64;
             key.set_value(name, &val1).unwrap();
             let val2: u64 = key.get_value(name).unwrap();
             assert_eq!(val1, val2);
@@ -1338,9 +1347,9 @@ mod test {
             t_bool: false,
             t_u8: 127,
             t_u16: 32768,
-            t_u32: 123456789,
-            t_u64: 123456789101112,
-            t_usize: 1234567891,
+            t_u32: 123_456_789,
+            t_u64: 123_456_789_101_112,
+            t_usize: 1_234_567_891,
             t_struct: Rectangle {
                 x: 55,
                 y: 77,
@@ -1351,10 +1360,10 @@ mod test {
             t_i8: -123,
             t_i16: -2049,
             t_i32: 20100,
-            t_i64: -12345678910,
-            t_isize: -1234567890,
+            t_i64: -12_345_678_910,
+            t_isize: -1_234_567_890,
             t_f64: -0.01,
-            t_f32: 3.14,
+            t_f32: 3.15,
         };
 
         with_key!(key, "Serialization" => {

@@ -33,9 +33,11 @@
     clippy::cast_lossless,
     clippy::module_name_repetitions,
     clippy::must_use_candidate,
-    clippy::use_self, // Some things aren't allowed in older compilers.
+    clippy::use_self, // Not supported in some situations in older compilers.
 )]
 
+// This is required on rustc < 1.42.0.
+#[allow(unused_extern_crates)]
 extern crate proc_macro;
 
 macro_rules! error {
@@ -65,7 +67,6 @@ mod kw {
 mod date;
 mod ext;
 mod offset;
-mod shim;
 mod time;
 mod time_crate;
 

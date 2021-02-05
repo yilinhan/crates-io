@@ -149,6 +149,7 @@ pub trait ByteVec: Sealed {
     /// let s = Vec::from_slice(b"abc");
     /// assert_eq!(s, B("abc"));
     /// ```
+    #[inline]
     fn from_slice<B: AsRef<[u8]>>(bytes: B) -> Vec<u8> {
         bytes.as_ref().to_vec()
     }
@@ -424,15 +425,14 @@ pub trait ByteVec: Sealed {
     where
         Self: Sized,
     {
-        let v = self.as_vec();
-        if let Ok(allutf8) = v.to_str() {
-            return allutf8.to_string();
+        match self.as_vec().to_str_lossy() {
+            Cow::Borrowed(_) => {
+                // SAFETY: to_str_lossy() returning a Cow::Borrowed guarantees
+                // the entire string is valid utf8.
+                unsafe { self.into_string_unchecked() }
+            }
+            Cow::Owned(s) => s,
         }
-        let mut dst = String::with_capacity(v.len());
-        for ch in v.chars() {
-            dst.push(ch);
-        }
-        dst
     }
 
     /// Unsafely convert this byte string into a `String`, without checking for
@@ -461,6 +461,7 @@ pub trait ByteVec: Sealed {
     /// let s = unsafe { Vec::from("☃βツ").into_string_unchecked() };
     /// assert_eq!("☃βツ", s);
     /// ```
+    #[inline]
     unsafe fn into_string_unchecked(self) -> String
     where
         Self: Sized,

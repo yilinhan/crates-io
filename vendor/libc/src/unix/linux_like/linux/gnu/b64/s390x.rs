@@ -575,6 +575,8 @@ pub const TIOCMBIC: ::c_ulong = 0x5417;
 pub const TIOCMSET: ::c_ulong = 0x5418;
 pub const FIONREAD: ::c_ulong = 0x541B;
 pub const TIOCCONS: ::c_ulong = 0x541D;
+pub const TIOCSBRK: ::c_ulong = 0x5427;
+pub const TIOCCBRK: ::c_ulong = 0x5428;
 
 pub const TCSANOW: ::c_int = 0;
 pub const TCSADRAIN: ::c_int = 1;
@@ -1005,8 +1007,9 @@ pub const SYS_setfsuid: ::c_long = 215;
 pub const SYS_setfsgid: ::c_long = 216;
 pub const SYS_newfstatat: ::c_long = 293;
 pub const SYS_statx: ::c_long = 379;
+pub const SYS_pidfd_open: ::c_long = 434;
+pub const SYS_clone3: ::c_long = 435;
 
-#[link(name = "util")]
 extern "C" {
 
     pub fn sysctl(

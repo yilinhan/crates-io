@@ -1,6 +1,6 @@
 #![cfg_attr(any(loom, not(feature = "sync")), allow(dead_code, unreachable_pub))]
 
-use crate::loom::cell::CausalCell;
+use crate::loom::cell::UnsafeCell;
 use crate::loom::sync::atomic::{self, AtomicUsize};
 
 use std::fmt;
@@ -24,7 +24,7 @@ use std::task::Waker;
 /// `wake`.
 pub(crate) struct AtomicWaker {
     state: AtomicUsize,
-    waker: CausalCell<Option<Waker>>,
+    waker: UnsafeCell<Option<Waker>>,
 }
 
 // `AtomicWaker` is a multi-consumer, single-producer transfer cell. The cell
@@ -137,17 +137,16 @@ impl AtomicWaker {
     pub(crate) fn new() -> AtomicWaker {
         AtomicWaker {
             state: AtomicUsize::new(WAITING),
-            waker: CausalCell::new(None),
+            waker: UnsafeCell::new(None),
         }
     }
 
+    /*
     /// Registers the current waker to be notified on calls to `wake`.
-    ///
-    /// This is the same as calling `register_task` with `task::current()`.
-    #[cfg(feature = "io-driver")]
     pub(crate) fn register(&self, waker: Waker) {
         self.do_register(waker);
     }
+    */
 
     /// Registers the provided waker to be notified on calls to `wake`.
     ///
@@ -172,7 +171,11 @@ impl AtomicWaker {
     where
         W: WakerRef,
     {
-        match self.state.compare_and_swap(WAITING, REGISTERING, Acquire) {
+        match self
+            .state
+            .compare_exchange(WAITING, REGISTERING, Acquire, Acquire)
+            .unwrap_or_else(|x| x)
+        {
             WAITING => {
                 unsafe {
                     // Locked acquired, update the waker cell

@@ -1,4 +1,4 @@
-use auxiliary_macros::add_pinned_field;
+use auxiliary_macro::add_pinned_field;
 use pin_project::pin_project;
 
 fn is_unpin<T: Unpin>() {}
@@ -7,14 +7,14 @@ fn is_unpin<T: Unpin>() {}
 #[add_pinned_field]
 struct Foo {
     #[pin]
-    field: u32,
+    f: u32,
 }
 
 #[add_pinned_field]
 #[pin_project]
 struct Bar {
     #[pin]
-    field: u32,
+    f: u32,
 }
 
 fn main() {

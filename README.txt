@@ -93,7 +93,7 @@ humantime                     1.3.0
 hyper                         0.13.9
 hyper                         0.14.2
 hyper-tls                     0.4.3
-idna                          0.2.0
+idna                          0.2.1
 ignore                        0.4.17
 indexmap                      1.6.1
 inlinable_string              0.1.14

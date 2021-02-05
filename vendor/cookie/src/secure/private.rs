@@ -1,15 +1,20 @@
-use secure::ring::aead::{Aad, Algorithm, Nonce, AES_256_GCM};
-use secure::ring::aead::{LessSafeKey, UnboundKey};
-use secure::ring::rand::{SecureRandom, SystemRandom};
-use secure::{base64, Key};
+extern crate aes_gcm;
 
-use {Cookie, CookieJar};
+use std::convert::TryInto;
+use std::borrow::{Borrow, BorrowMut};
+
+use crate::secure::{base64, rand, Key};
+use crate::{Cookie, CookieJar};
+
+use self::aes_gcm::Aes256Gcm;
+use self::aes_gcm::aead::{Aead, AeadInPlace, NewAead, generic_array::GenericArray, Payload};
+use self::rand::RngCore;
 
 // Keep these in sync, and keep the key len synced with the `private` docs as
 // well as the `KEYS_INFO` const in secure::Key.
-static ALGO: &'static Algorithm = &AES_256_GCM;
-const NONCE_LEN: usize = 12;
-pub const KEY_LEN: usize = 32;
+pub(crate) const NONCE_LEN: usize = 12;
+pub(crate) const TAG_LEN: usize = 16;
+pub(crate) const KEY_LEN: usize = 32;
 
 /// A child cookie jar that provides authenticated encryption for its cookies.
 ///
@@ -18,22 +23,49 @@ pub const KEY_LEN: usize = 32;
 /// `PrivateJar` are simultaneously assured confidentiality, integrity, and
 /// authenticity. In other words, clients cannot discover nor tamper with the
 /// contents of a cookie, nor can they fabricate cookie data.
-///
-/// This type is only available when the `secure` feature is enabled.
-pub struct PrivateJar<'a> {
-    parent: &'a mut CookieJar,
+#[cfg_attr(nightly, doc(cfg(feature = "private")))]
+pub struct PrivateJar<J> {
+    parent: J,
     key: [u8; KEY_LEN]
 }
 
-impl<'a> PrivateJar<'a> {
+impl<J> PrivateJar<J> {
     /// Creates a new child `PrivateJar` with parent `parent` and key `key`.
     /// This method is typically called indirectly via the `signed` method of
     /// `CookieJar`.
-    #[doc(hidden)]
-    pub fn new(parent: &'a mut CookieJar, key: &Key) -> PrivateJar<'a> {
-        let mut key_array = [0u8; KEY_LEN];
-        key_array.copy_from_slice(key.encryption());
-        PrivateJar { parent: parent, key: key_array }
+    pub(crate) fn new(parent: J, key: &Key) -> PrivateJar<J> {
+        PrivateJar { parent, key: key.encryption().try_into().expect("enc key len") }
+    }
+
+    /// Encrypts the cookie's value with authenticated encryption providing
+    /// confidentiality, integrity, and authenticity.
+    fn encrypt_cookie(&self, cookie: &mut Cookie) {
+        // Create a vec to hold the [nonce | cookie value | tag].
+        let cookie_val = cookie.value().as_bytes();
+        let mut data = vec![0; NONCE_LEN + cookie_val.len() + TAG_LEN];
+
+        // Split data into three: nonce, input/output, tag. Copy input.
+        let (nonce, in_out) = data.split_at_mut(NONCE_LEN);
+        let (in_out, tag) = in_out.split_at_mut(cookie_val.len());
+        in_out.copy_from_slice(cookie_val);
+
+        // Fill nonce piece with random data.
+        let mut rng = self::rand::thread_rng();
+        rng.try_fill_bytes(nonce).expect("couldn't random fill nonce");
+        let nonce = GenericArray::clone_from_slice(nonce);
+
+        // Perform the actual sealing operation, using the cookie's name as
+        // associated data to prevent value swapping.
+        let aad = cookie.name().as_bytes();
+        let aead = Aes256Gcm::new(GenericArray::from_slice(&self.key));
+        let aad_tag = aead.encrypt_in_place_detached(&nonce, aad, in_out)
+            .expect("encryption failure!");
+
+        // Copy the tag into the tag piece.
+        tag.copy_from_slice(&aad_tag);
+
+        // Base64 encode [nonce | encrypted value | tag].
+        cookie.set_value(base64::encode(&data));
     }
 
     /// Given a sealed value `str` and a key name `name`, where the nonce is
@@ -41,24 +73,56 @@ impl<'a> PrivateJar<'a> {
     /// verifies and decrypts the sealed value and returns it. If there's a
     /// problem, returns an `Err` with a string describing the issue.
     fn unseal(&self, name: &str, value: &str) -> Result<String, &'static str> {
-        let mut data = base64::decode(value).map_err(|_| "bad base64 value")?;
+        let data = base64::decode(value).map_err(|_| "bad base64 value")?;
         if data.len() <= NONCE_LEN {
             return Err("length of decoded data is <= NONCE_LEN");
         }
 
-        let ad = Aad::from(name.as_bytes());
-        let key = LessSafeKey::new(UnboundKey::new(&ALGO, &self.key).expect("matching key length"));
-        let (nonce, mut sealed) = data.split_at_mut(NONCE_LEN);
-        let nonce = Nonce::try_assume_unique_for_key(nonce)
-            .expect("invalid length of `nonce`");
-        let unsealed = key.open_in_place(nonce, ad, &mut sealed)
-            .map_err(|_| "invalid key/nonce/value: bad seal")?;
+        let (nonce, cipher) = data.split_at(NONCE_LEN);
+        let payload = Payload { msg: cipher, aad: name.as_bytes() };
 
-        ::std::str::from_utf8(unsealed)
-            .map(|s| s.to_string())
-            .map_err(|_| "bad unsealed utf8")
+        let aead = Aes256Gcm::new(GenericArray::from_slice(&self.key));
+        aead.decrypt(GenericArray::from_slice(nonce), payload)
+            .map_err(|_| "invalid key/nonce/value: bad seal")
+            .and_then(|s| String::from_utf8(s).map_err(|_| "bad unsealed utf8"))
     }
 
+    /// Authenticates and decrypts `cookie`, returning the plaintext version if
+    /// decryption succeeds or `None` otherwise. Authenticatation and decryption
+    /// _always_ succeeds if `cookie` was generated by a `PrivateJar` with the
+    /// same key as `self`.
+    ///
+    /// # Example
+    ///
+    /// ```rust
+    /// use cookie::{CookieJar, Cookie, Key};
+    ///
+    /// let key = Key::generate();
+    /// let mut jar = CookieJar::new();
+    /// assert!(jar.private(&key).get("name").is_none());
+    ///
+    /// jar.private_mut(&key).add(Cookie::new("name", "value"));
+    /// assert_eq!(jar.private(&key).get("name").unwrap().value(), "value");
+    ///
+    /// let plain = jar.get("name").cloned().unwrap();
+    /// assert_ne!(plain.value(), "value");
+    /// let decrypted = jar.private(&key).decrypt(plain).unwrap();
+    /// assert_eq!(decrypted.value(), "value");
+    ///
+    /// let plain = Cookie::new("plaintext", "hello");
+    /// assert!(jar.private(&key).decrypt(plain).is_none());
+    /// ```
+    pub fn decrypt(&self, mut cookie: Cookie<'static>) -> Option<Cookie<'static>> {
+        if let Ok(value) = self.unseal(cookie.name(), cookie.value()) {
+            cookie.set_value(value);
+            return Some(cookie);
+        }
+
+        None
+    }
+}
+
+impl<J: Borrow<CookieJar>> PrivateJar<J> {
     /// Returns a reference to the `Cookie` inside this jar with the name `name`
     /// and authenticates and decrypts the cookie's value, returning a `Cookie`
     /// with the decrypted value. If the cookie cannot be found, or the cookie
@@ -70,25 +134,20 @@ impl<'a> PrivateJar<'a> {
     /// use cookie::{CookieJar, Cookie, Key};
     ///
     /// let key = Key::generate();
-    /// let mut jar = CookieJar::new();
-    /// let mut private_jar = jar.private(&key);
-    /// assert!(private_jar.get("name").is_none());
+    /// let jar = CookieJar::new();
+    /// assert!(jar.private(&key).get("name").is_none());
     ///
+    /// let mut jar = jar;
+    /// let mut private_jar = jar.private_mut(&key);
     /// private_jar.add(Cookie::new("name", "value"));
     /// assert_eq!(private_jar.get("name").unwrap().value(), "value");
     /// ```
     pub fn get(&self, name: &str) -> Option<Cookie<'static>> {
-        if let Some(cookie_ref) = self.parent.get(name) {
-            let mut cookie = cookie_ref.clone();
-            if let Ok(value) = self.unseal(name, cookie.value()) {
-                cookie.set_value(value);
-                return Some(cookie);
-            }
-        }
-
-        None
+        self.parent.borrow().get(name).and_then(|c| self.decrypt(c.clone()))
     }
+}
 
+impl<J: BorrowMut<CookieJar>> PrivateJar<J> {
     /// Adds `cookie` to the parent jar. The cookie's value is encrypted with
     /// authenticated encryption assuring confidentiality, integrity, and
     /// authenticity.
@@ -100,24 +159,22 @@ impl<'a> PrivateJar<'a> {
     ///
     /// let key = Key::generate();
     /// let mut jar = CookieJar::new();
-    /// jar.private(&key).add(Cookie::new("name", "value"));
+    /// jar.private_mut(&key).add(Cookie::new("name", "value"));
     ///
     /// assert_ne!(jar.get("name").unwrap().value(), "value");
     /// assert_eq!(jar.private(&key).get("name").unwrap().value(), "value");
     /// ```
     pub fn add(&mut self, mut cookie: Cookie<'static>) {
         self.encrypt_cookie(&mut cookie);
-
-        // Add the sealed cookie to the parent.
-        self.parent.add(cookie);
+        self.parent.borrow_mut().add(cookie);
     }
 
     /// Adds an "original" `cookie` to parent jar. The cookie's value is
     /// encrypted with authenticated encryption assuring confidentiality,
     /// integrity, and authenticity. Adding an original cookie does not affect
-    /// the [`CookieJar::delta()`](struct.CookieJar.html#method.delta)
-    /// computation. This method is intended to be used to seed the cookie jar
-    /// with cookies received from a client's HTTP message.
+    /// the [`CookieJar::delta()`] computation. This method is intended to be
+    /// used to seed the cookie jar with cookies received from a client's HTTP
+    /// message.
     ///
     /// For accurate `delta` computations, this method should not be called
     /// after calling `remove`.
@@ -129,50 +186,14 @@ impl<'a> PrivateJar<'a> {
     ///
     /// let key = Key::generate();
     /// let mut jar = CookieJar::new();
-    /// jar.private(&key).add_original(Cookie::new("name", "value"));
+    /// jar.private_mut(&key).add_original(Cookie::new("name", "value"));
     ///
     /// assert_eq!(jar.iter().count(), 1);
     /// assert_eq!(jar.delta().count(), 0);
     /// ```
     pub fn add_original(&mut self, mut cookie: Cookie<'static>) {
         self.encrypt_cookie(&mut cookie);
-
-        // Add the sealed cookie to the parent.
-        self.parent.add_original(cookie);
-    }
-
-    /// Encrypts the cookie's value with authenticated encryption assuring
-    /// confidentiality, integrity, and authenticity.
-    fn encrypt_cookie(&self, cookie: &mut Cookie) {
-        // Create the `LessSafeKey` structure.
-        let unbound = UnboundKey::new(&ALGO, &self.key).expect("matching key length");
-        let key = LessSafeKey::new(unbound);
-
-        // Create a vec to hold the [nonce | cookie value | tag].
-        let cookie_val = cookie.value().as_bytes();
-        let mut data = vec![0; NONCE_LEN + cookie_val.len() + ALGO.tag_len()];
-
-        // Split data into three: nonce, input/output, tag. Copy input.
-        let (nonce, in_out) = data.split_at_mut(NONCE_LEN);
-        let (in_out, tag) = in_out.split_at_mut(cookie_val.len());
-        in_out.copy_from_slice(cookie_val);
-
-        // Randomly generate the nonce into the nonce piece.
-        SystemRandom::new().fill(nonce).expect("couldn't random fill nonce");
-        let nonce = Nonce::try_assume_unique_for_key(nonce)
-            .expect("invalid `nonce` length");
-
-        // Perform the actual sealing operation, using the cookie's name as
-        // associated data to prevent value swapping.
-        let ad = Aad::from(cookie.name().as_bytes());
-        let ad_tag = key.seal_in_place_separate_tag(nonce, ad, in_out)
-            .expect("in-place seal");
-
-        // Copy the tag into the tag piece.
-        tag.copy_from_slice(ad_tag.as_ref());
-
-        // Base64 encode [none | encrypted value | tag].
-        cookie.set_value(base64::encode(&data));
+        self.parent.borrow_mut().add_original(cookie);
     }
 
     /// Removes `cookie` from the parent jar.
@@ -180,8 +201,8 @@ impl<'a> PrivateJar<'a> {
     /// For correct removal, the passed in `cookie` must contain the same `path`
     /// and `domain` as the cookie that was initially set.
     ///
-    /// See [CookieJar::remove](struct.CookieJar.html#method.remove) for more
-    /// details.
+    /// This is identical to [`CookieJar::remove()`]. See the method's
+    /// documentation for more details.
     ///
     /// # Example
     ///
@@ -190,7 +211,7 @@ impl<'a> PrivateJar<'a> {
     ///
     /// let key = Key::generate();
     /// let mut jar = CookieJar::new();
-    /// let mut private_jar = jar.private(&key);
+    /// let mut private_jar = jar.private_mut(&key);
     ///
     /// private_jar.add(Cookie::new("name", "value"));
     /// assert!(private_jar.get("name").is_some());
@@ -199,46 +220,42 @@ impl<'a> PrivateJar<'a> {
     /// assert!(private_jar.get("name").is_none());
     /// ```
     pub fn remove(&mut self, cookie: Cookie<'static>) {
-        self.parent.remove(cookie);
+        self.parent.borrow_mut().remove(cookie);
     }
 }
 
 #[cfg(test)]
 mod test {
-    use {CookieJar, Cookie, Key};
+    use crate::{CookieJar, Cookie, Key};
 
     #[test]
     fn simple() {
         let key = Key::generate();
         let mut jar = CookieJar::new();
-        assert_simple_behaviour!(jar, jar.private(&key));
+        assert_simple_behaviour!(jar, jar.private_mut(&key));
     }
 
     #[test]
-    fn private() {
+    fn secure() {
         let key = Key::generate();
         let mut jar = CookieJar::new();
-        assert_secure_behaviour!(jar, jar.private(&key));
+        assert_secure_behaviour!(jar, jar.private_mut(&key));
     }
 
-#[test]
-    fn roundtrip_tests() {
-        use ::{Cookie, CookieJar};
-
-        // Secret is 'Super secret!' passed through sha256
-        let secret = b"\x1b\x1c\x6f\x1b\x31\x99\x82\x77\x0e\x05\xb6\x05\x54\x0b\xd9\xea\
-            \x54\x9f\x9a\x56\xf4\x0f\x97\xdc\x6e\xf2\x89\x86\x91\xe0\xa5\x79";
-        let key = Key::from_master(secret);
+    #[test]
+    fn roundtrip() {
+        // Secret is SHA-256 hash of 'Super secret!' passed through HKDF-SHA256.
+        let key = Key::from(&[89, 202, 200, 125, 230, 90, 197, 245, 166, 249,
+            34, 169, 135, 31, 20, 197, 94, 154, 254, 79, 60, 26, 8, 143, 254,
+            24, 116, 138, 92, 225, 159, 60, 157, 41, 135, 129, 31, 226, 196, 16,
+            198, 168, 134, 4, 42, 1, 196, 24, 57, 103, 241, 147, 201, 185, 233,
+            10, 180, 170, 187, 89, 252, 137, 110, 107]);
 
         let mut jar = CookieJar::new();
-        jar.add(Cookie::new("signed_with_ring014", "3tdHXEQ2kf6fxC7dWzBGmpSLMtJenXLKrZ9cHkSsl1w=Tamper-proof"));
-        jar.add(Cookie::new("encrypted_with_ring014", "lObeZJorGVyeSWUA8khTO/8UCzFVBY9g0MGU6/J3NN1R5x11dn2JIA=="));
-        jar.add(Cookie::new("signed_with_ring016", "3tdHXEQ2kf6fxC7dWzBGmpSLMtJenXLKrZ9cHkSsl1w=Tamper-proof"));
-        jar.add(Cookie::new("encrypted_with_ring016", "SU1ujceILyMBg3fReqRmA9HUtAIoSPZceOM/CUpObROHEujXIjonkA=="));
-
-        let signed = jar.signed(&key);
-        assert_eq!(signed.get("signed_with_ring014").unwrap().value(), "Tamper-proof");
-        assert_eq!(signed.get("signed_with_ring016").unwrap().value(), "Tamper-proof");
+        jar.add(Cookie::new("encrypted_with_ring014",
+                "lObeZJorGVyeSWUA8khTO/8UCzFVBY9g0MGU6/J3NN1R5x11dn2JIA=="));
+        jar.add(Cookie::new("encrypted_with_ring016",
+                "SU1ujceILyMBg3fReqRmA9HUtAIoSPZceOM/CUpObROHEujXIjonkA=="));
 
         let private = jar.private(&key);
         assert_eq!(private.get("encrypted_with_ring014").unwrap().value(), "Tamper-proof");

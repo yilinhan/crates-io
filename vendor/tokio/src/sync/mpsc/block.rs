@@ -1,8 +1,6 @@
-use crate::loom::{
-    cell::CausalCell,
-    sync::atomic::{AtomicPtr, AtomicUsize},
-    thread,
-};
+use crate::loom::cell::UnsafeCell;
+use crate::loom::sync::atomic::{AtomicPtr, AtomicUsize};
+use crate::loom::thread;
 
 use std::mem::MaybeUninit;
 use std::ops;
@@ -26,7 +24,7 @@ pub(crate) struct Block<T> {
 
     /// The observed `tail_position` value *after* the block has been passed by
     /// `block_tail`.
-    observed_tail_position: CausalCell<usize>,
+    observed_tail_position: UnsafeCell<usize>,
 
     /// Array containing values pushed into the block. Values are stored in a
     /// continuous array in order to improve cache line behavior when reading.
@@ -39,7 +37,7 @@ pub(crate) enum Read<T> {
     Closed,
 }
 
-struct Values<T>([CausalCell<MaybeUninit<T>>; BLOCK_CAP]);
+struct Values<T>([UnsafeCell<MaybeUninit<T>>; BLOCK_CAP]);
 
 use super::BLOCK_CAP;
 
@@ -85,7 +83,7 @@ impl<T> Block<T> {
 
             ready_slots: AtomicUsize::new(0),
 
-            observed_tail_position: CausalCell::new(0),
+            observed_tail_position: UnsafeCell::new(0),
 
             // Value storage
             values: unsafe { Values::uninitialized() },
@@ -260,13 +258,15 @@ impl<T> Block<T> {
     pub(crate) unsafe fn try_push(
         &self,
         block: &mut NonNull<Block<T>>,
-        ordering: Ordering,
+        success: Ordering,
+        failure: Ordering,
     ) -> Result<(), NonNull<Block<T>>> {
         block.as_mut().start_index = self.start_index.wrapping_add(BLOCK_CAP);
 
         let next_ptr = self
             .next
-            .compare_and_swap(ptr::null_mut(), block.as_ptr(), ordering);
+            .compare_exchange(ptr::null_mut(), block.as_ptr(), success, failure)
+            .unwrap_or_else(|x| x);
 
         match NonNull::new(next_ptr) {
             Some(next_ptr) => Err(next_ptr),
@@ -308,11 +308,11 @@ impl<T> Block<T> {
         //
         // `Release` ensures that the newly allocated block is available to
         // other threads acquiring the next pointer.
-        let next = NonNull::new(self.next.compare_and_swap(
-            ptr::null_mut(),
-            new_block.as_ptr(),
-            AcqRel,
-        ));
+        let next = NonNull::new(
+            self.next
+                .compare_exchange(ptr::null_mut(), new_block.as_ptr(), AcqRel, Acquire)
+                .unwrap_or_else(|x| x),
+        );
 
         let next = match next {
             Some(next) => next,
@@ -335,7 +335,7 @@ impl<T> Block<T> {
 
         // TODO: Should this iteration be capped?
         loop {
-            let actual = unsafe { curr.as_ref().try_push(&mut new_block, AcqRel) };
+            let actual = unsafe { curr.as_ref().try_push(&mut new_block, AcqRel, Acquire) };
 
             curr = match actual {
                 Ok(_) => {
@@ -365,12 +365,12 @@ impl<T> Values<T> {
     unsafe fn uninitialized() -> Values<T> {
         let mut vals = MaybeUninit::uninit();
 
-        // When fuzzing, `CausalCell` needs to be initialized.
+        // When fuzzing, `UnsafeCell` needs to be initialized.
         if_loom! {
-            let p = vals.as_mut_ptr() as *mut CausalCell<MaybeUninit<T>>;
+            let p = vals.as_mut_ptr() as *mut UnsafeCell<MaybeUninit<T>>;
             for i in 0..BLOCK_CAP {
                 p.add(i)
-                    .write(CausalCell::new(MaybeUninit::uninit()));
+                    .write(UnsafeCell::new(MaybeUninit::uninit()));
             }
         }
 
@@ -379,7 +379,7 @@ impl<T> Values<T> {
 }
 
 impl<T> ops::Index<usize> for Values<T> {
-    type Output = CausalCell<MaybeUninit<T>>;
+    type Output = UnsafeCell<MaybeUninit<T>>;
 
     fn index(&self, index: usize) -> &Self::Output {
         self.0.index(index)

@@ -12,7 +12,7 @@
 
 [package]
 name = "failure"
-version = "0.1.7"
+version = "0.1.8"
 authors = ["Without Boats <boats@mozilla.com>"]
 description = "Experimental error handling abstraction."
 homepage = "https://rust-lang-nursery.github.io/failure/"
@@ -31,3 +31,5 @@ optional = true
 default = ["std", "derive"]
 derive = ["failure_derive"]
 std = ["backtrace"]
+[badges.maintenance]
+status = "deprecated"

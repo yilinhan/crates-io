@@ -5,11 +5,13 @@ use std::sync::Arc;
 
 use crate::{IntoUrl, Url};
 use http::{header::HeaderValue, Uri};
+use ipnet::IpNet;
 use percent_encoding::percent_decode;
 use std::collections::HashMap;
 use std::env;
 #[cfg(target_os = "windows")]
 use std::error::Error;
+use std::net::IpAddr;
 #[cfg(target_os = "windows")]
 use winreg::enums::HKEY_CURRENT_USER;
 #[cfg(target_os = "windows")]
@@ -50,6 +52,31 @@ use winreg::RegKey;
 #[derive(Clone)]
 pub struct Proxy {
     intercept: Intercept,
+    no_proxy: Option<NoProxy>,
+}
+
+/// Represents a possible matching entry for an IP address
+#[derive(Clone, Debug)]
+enum Ip {
+    Address(IpAddr),
+    Network(IpNet),
+}
+
+/// A wrapper around a list of IP cidr blocks or addresses with a [IpMatcher::contains] method for
+/// checking if an IP address is contained within the matcher
+#[derive(Clone, Debug, Default)]
+struct IpMatcher(Vec<Ip>);
+
+/// A wrapper around a list of domains with a [DomainMatcher::contains] method for checking if a
+/// domain is contained within the matcher
+#[derive(Clone, Debug, Default)]
+struct DomainMatcher(Vec<String>);
+
+/// A configuration for filtering out requests that shouldn't be proxied
+#[derive(Clone, Debug, Default)]
+struct NoProxy {
+    ips: IpMatcher,
+    domains: DomainMatcher,
 }
 
 /// A particular scheme used for proxying requests.
@@ -184,15 +211,22 @@ impl Proxy {
     }
 
     pub(crate) fn system() -> Proxy {
-        if cfg!(feature = "__internal_proxy_sys_no_cache") {
-            Proxy::new(Intercept::System(Arc::new(get_sys_proxies())))
+        let mut proxy = if cfg!(feature = "__internal_proxy_sys_no_cache") {
+            Proxy::new(Intercept::System(Arc::new(get_sys_proxies(
+                get_from_registry(),
+            ))))
         } else {
             Proxy::new(Intercept::System(SYS_PROXIES.clone()))
-        }
+        };
+        proxy.no_proxy = NoProxy::new();
+        proxy
     }
 
     fn new(intercept: Intercept) -> Proxy {
-        Proxy { intercept }
+        Proxy {
+            intercept,
+            no_proxy: None,
+        }
     }
 
     /// Set the `Proxy-Authorization` header using Basic auth.
@@ -215,10 +249,20 @@ impl Proxy {
 
     pub(crate) fn maybe_has_http_auth(&self) -> bool {
         match self.intercept {
-            Intercept::All(ProxyScheme::Http { auth: Some(..), .. }) |
-            Intercept::Http(ProxyScheme::Http { auth: Some(..), .. }) |
+            Intercept::All(ProxyScheme::Http { auth: Some(..), .. })
+            | Intercept::Http(ProxyScheme::Http { auth: Some(..), .. })
             // Custom *may* match 'http', so assume so.
-            Intercept::Custom(_) => true,
+            | Intercept::Custom(_) => true,
+            Intercept::System(ref system) => {
+                if let Some(proxy) = system.get("http") {
+                    match proxy {
+                        ProxyScheme::Http { auth, .. } => auth.is_some(),
+                        _ => false,
+                    }
+                } else {
+                    false
+                }
+            }
             _ => false,
         }
     }
@@ -227,6 +271,16 @@ impl Proxy {
         match self.intercept {
             Intercept::All(ProxyScheme::Http { ref auth, .. })
             | Intercept::Http(ProxyScheme::Http { ref auth, .. }) => auth.clone(),
+            Intercept::System(ref system) => {
+                if let Some(proxy) = system.get("http") {
+                    match proxy {
+                        ProxyScheme::Http { auth, .. } => auth.clone(),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            }
             Intercept::Custom(ref custom) => custom.call(uri).and_then(|scheme| match scheme {
                 ProxyScheme::Http { auth, .. } => auth,
                 ProxyScheme::Https { auth, .. } => auth,
@@ -255,7 +309,15 @@ impl Proxy {
                 }
             }
             Intercept::System(ref map) => {
-                map.get(uri.scheme()).cloned()
+                let in_no_proxy = self
+                    .no_proxy
+                    .as_ref()
+                    .map_or(false, |np| np.contains(uri.host()));
+                if in_no_proxy {
+                    None
+                } else {
+                    map.get(uri.scheme()).cloned()
+                }
             }
             Intercept::Custom(ref custom) => custom.call(uri),
         }
@@ -274,7 +336,91 @@ impl Proxy {
 
 impl fmt::Debug for Proxy {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_tuple("Proxy").field(&self.intercept).finish()
+        f.debug_tuple("Proxy")
+            .field(&self.intercept)
+            .field(&self.no_proxy)
+            .finish()
+    }
+}
+
+impl NoProxy {
+    /// Returns a new no proxy configration if the NO_PROXY/no_proxy environment variable is set.
+    /// Returns None otherwise
+    fn new() -> Option<Self> {
+        let raw = env::var("NO_PROXY")
+            .or_else(|_| env::var("no_proxy"))
+            .unwrap_or_default();
+        if raw.is_empty() {
+            return None;
+        }
+        let mut ips = Vec::new();
+        let mut domains = Vec::new();
+        let parts = raw.split(',');
+        for part in parts {
+            match part.parse::<IpNet>() {
+                // If we can parse an IP net or address, then use it, otherwise, assume it is a domain
+                Ok(ip) => ips.push(Ip::Network(ip)),
+                Err(_) => match part.parse::<IpAddr>() {
+                    Ok(addr) => ips.push(Ip::Address(addr)),
+                    Err(_) => domains.push(part.to_owned()),
+                },
+            }
+        }
+        Some(NoProxy {
+            ips: IpMatcher(ips),
+            domains: DomainMatcher(domains),
+        })
+    }
+
+    fn contains(&self, host: &str) -> bool {
+        // According to RFC3986, raw IPv6 hosts will be wrapped in []. So we need to strip those off
+        // the end in order to parse correctly
+        let host = if host.starts_with('[') {
+            let x: &[_] = &['[', ']'];
+            host.trim_matches(x)
+        } else {
+            host
+        };
+        match host.parse::<IpAddr>() {
+            // If we can parse an IP addr, then use it, otherwise, assume it is a domain
+            Ok(ip) => self.ips.contains(ip),
+            Err(_) => self.domains.contains(host),
+        }
+    }
+}
+
+impl IpMatcher {
+    fn contains(&self, addr: IpAddr) -> bool {
+        for ip in self.0.iter() {
+            match ip {
+                Ip::Address(address) => {
+                    if &addr == address {
+                        return true;
+                    }
+                }
+                Ip::Network(net) => {
+                    if net.contains(&addr) {
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+}
+
+impl DomainMatcher {
+    fn contains(&self, domain: &str) -> bool {
+        for d in self.0.iter() {
+            // First check for a "wildcard" domain match. A single "." will match anything.
+            // Otherwise, check that the domains are equal
+            if (d.starts_with('.') && domain.ends_with(d.get(1..).unwrap_or_default()))
+                || d == domain
+            {
+                return true;
+            }
+        }
+        false
     }
 }
 
@@ -342,11 +488,11 @@ impl ProxyScheme {
             ProxyScheme::Http { ref mut auth, .. } => {
                 let header = encode_basic_auth(&username.into(), &password.into());
                 *auth = Some(header);
-            },
+            }
             ProxyScheme::Https { ref mut auth, .. } => {
                 let header = encode_basic_auth(&username.into(), &password.into());
                 *auth = Some(header);
-            },
+            }
             #[cfg(feature = "socks")]
             ProxyScheme::Socks5 { ref mut auth, .. } => {
                 *auth = Some((username.into(), password.into()));
@@ -360,12 +506,12 @@ impl ProxyScheme {
                 if auth.is_none() {
                     *auth = update.clone();
                 }
-            },
+            }
             ProxyScheme::Https { ref mut auth, .. } => {
                 if auth.is_none() {
                     *auth = update.clone();
                 }
-            },
+            }
             #[cfg(feature = "socks")]
             ProxyScheme::Socks5 { .. } => {}
         }
@@ -383,10 +529,11 @@ impl ProxyScheme {
         // Resolve URL to a host and port
         #[cfg(feature = "socks")]
         let to_addr = || {
-            let addrs = url.socket_addrs(|| match url.scheme() {
-                "socks5" | "socks5h" => Some(1080),
-                _ => None,
-            })
+            let addrs = url
+                .socket_addrs(|| match url.scheme() {
+                    "socks5" | "socks5h" => Some(1080),
+                    _ => None,
+                })
                 .map_err(crate::error::builder)?;
             addrs
                 .into_iter()
@@ -437,29 +584,15 @@ impl ProxyScheme {
 impl fmt::Debug for ProxyScheme {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            ProxyScheme::Http {
-                auth: _auth,
-                host,
-            } => {
-                write!(f, "http://{}", host)
-            },
-            ProxyScheme::Https {
-                auth: _auth,
-                host,
-            } => {
-                write!(f, "https://{}", host)
-            },
+            ProxyScheme::Http { auth: _auth, host } => write!(f, "http://{}", host),
+            ProxyScheme::Https { auth: _auth, host } => write!(f, "https://{}", host),
             #[cfg(feature = "socks")]
             ProxyScheme::Socks5 {
                 addr,
                 auth: _auth,
                 remote_dns,
             } => {
-                let h = if *remote_dns {
-                    "h"
-                } else {
-                    ""
-                };
+                let h = if *remote_dns { "h" } else { "" };
                 write!(f, "socks5{}://{}", h, addr)
             }
         }
@@ -467,6 +600,7 @@ impl fmt::Debug for ProxyScheme {
 }
 
 type SystemProxyMap = HashMap<String, ProxyScheme>;
+type RegistryProxyValues = (u32, String);
 
 #[derive(Clone, Debug)]
 enum Intercept {
@@ -543,9 +677,7 @@ pub(crate) trait Dst {
 #[doc(hidden)]
 impl Dst for Uri {
     fn scheme(&self) -> &str {
-        self.scheme()
-            .expect("Uri should have a scheme")
-            .as_str()
+        self.scheme().expect("Uri should have a scheme").as_str()
     }
 
     fn host(&self) -> &str {
@@ -558,7 +690,7 @@ impl Dst for Uri {
 }
 
 lazy_static! {
-    static ref SYS_PROXIES: Arc<SystemProxyMap> = Arc::new(get_sys_proxies());
+    static ref SYS_PROXIES: Arc<SystemProxyMap> = Arc::new(get_sys_proxies(get_from_registry()));
 }
 
 /// Get system proxies information.
@@ -570,7 +702,11 @@ lazy_static! {
 /// Returns:
 ///     System proxies information as a hashmap like
 ///     {"http": Url::parse("http://127.0.0.1:80"), "https": Url::parse("https://127.0.0.1:80")}
-fn get_sys_proxies() -> SystemProxyMap {
+fn get_sys_proxies(
+    #[cfg_attr(not(target_os = "windows"), allow(unused_variables))] registry_values: Option<
+        RegistryProxyValues,
+    >,
+) -> SystemProxyMap {
     let proxies = get_from_environment();
 
     // TODO: move the following #[cfg] to `if expression` when attributes on `if` expressions allowed
@@ -578,7 +714,9 @@ fn get_sys_proxies() -> SystemProxyMap {
     {
         if proxies.is_empty() {
             // don't care errors if can't get proxies from registry, just return an empty HashMap.
-            return get_from_registry();
+            if let Some(registry_values) = registry_values {
+                return parse_registry_values(registry_values);
+            }
         }
     }
     proxies
@@ -597,10 +735,8 @@ fn get_from_environment() -> SystemProxyMap {
     let mut proxies = HashMap::new();
 
     if is_cgi() {
-        if log::log_enabled!(log::Level::Warn) {
-            if env::var_os("HTTP_PROXY").is_some() {
-                log::warn!("HTTP_PROXY environment variable ignored in CGI");
-            }
+        if log::log_enabled!(log::Level::Warn) && env::var_os("HTTP_PROXY").is_some() {
+            log::warn!("HTTP_PROXY environment variable ignored in CGI");
         }
     } else if !insert_from_env(&mut proxies, "http", "HTTP_PROXY") {
         insert_from_env(&mut proxies, "http", "http_proxy");
@@ -630,13 +766,32 @@ fn is_cgi() -> bool {
 }
 
 #[cfg(target_os = "windows")]
-fn get_from_registry_impl() -> Result<SystemProxyMap, Box<dyn Error>> {
+fn get_from_registry_impl() -> Result<RegistryProxyValues, Box<dyn Error>> {
     let hkcu = RegKey::predef(HKEY_CURRENT_USER);
     let internet_setting: RegKey =
         hkcu.open_subkey("Software\\Microsoft\\Windows\\CurrentVersion\\Internet Settings")?;
     // ensure the proxy is enable, if the value doesn't exist, an error will returned.
     let proxy_enable: u32 = internet_setting.get_value("ProxyEnable")?;
     let proxy_server: String = internet_setting.get_value("ProxyServer")?;
+
+    Ok((proxy_enable, proxy_server))
+}
+
+#[cfg(target_os = "windows")]
+fn get_from_registry() -> Option<RegistryProxyValues> {
+    get_from_registry_impl().ok()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn get_from_registry() -> Option<RegistryProxyValues> {
+    None
+}
+
+#[cfg(target_os = "windows")]
+fn parse_registry_values_impl(
+    registry_values: RegistryProxyValues,
+) -> Result<SystemProxyMap, Box<dyn Error>> {
+    let (proxy_enable, proxy_server) = registry_values;
 
     if proxy_enable == 0 {
         return Ok(HashMap::new());
@@ -649,11 +804,15 @@ fn get_from_registry_impl() -> Result<SystemProxyMap, Box<dyn Error>> {
             let protocol_parts: Vec<&str> = p.split("=").collect();
             match protocol_parts.as_slice() {
                 [protocol, address] => {
-                    insert_proxy(
-                        &mut proxies,
-                        *protocol,
-                        String::from(*address),
-                    );
+                    // If address doesn't specify an explicit protocol as protocol://address
+                    // then default to HTTP
+                    let address = if extract_type_prefix(*address).is_some() {
+                        String::from(*address)
+                    } else {
+                        format!("http://{}", address)
+                    };
+
+                    insert_proxy(&mut proxies, *protocol, address);
                 }
                 _ => {
                     // Contains invalid protocol setting, just break the loop
@@ -664,33 +823,52 @@ fn get_from_registry_impl() -> Result<SystemProxyMap, Box<dyn Error>> {
             }
         }
     } else {
-        // Use one setting for all protocols.
-        if proxy_server.starts_with("http:") {
-            insert_proxy(&mut proxies, "http", proxy_server);
+        if let Some(scheme) = extract_type_prefix(&proxy_server) {
+            // Explicit protocol has been specified
+            insert_proxy(&mut proxies, scheme, proxy_server.to_owned());
         } else {
-            insert_proxy(
-                &mut proxies,
-                "http",
-                format!("http://{}", proxy_server),
-            );
-            insert_proxy(
-                &mut proxies,
-                "https",
-                format!("https://{}", proxy_server),
-            );
+            // No explicit protocol has been specified, default to HTTP
+            insert_proxy(&mut proxies, "http", format!("http://{}", proxy_server));
+            insert_proxy(&mut proxies, "https", format!("http://{}", proxy_server));
         }
     }
     Ok(proxies)
 }
 
+/// Extract the protocol from the given address, if present
+/// For example, "https://example.com" will return Some("https")
 #[cfg(target_os = "windows")]
-fn get_from_registry() -> SystemProxyMap {
-    get_from_registry_impl().unwrap_or(HashMap::new())
+fn extract_type_prefix(address: &str) -> Option<&str> {
+    if let Some(indice) = address.find("://") {
+        if indice == 0 {
+            None
+        }
+        else {
+            let prefix = &address[..indice];
+            let contains_banned = prefix.contains(|c| c == ':' || c == '/');
+
+            if !contains_banned {
+                Some(prefix)
+            } else {
+                None
+            }
+        }
+    }
+    else {
+        None
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn parse_registry_values(registry_values: RegistryProxyValues) -> SystemProxyMap {
+    parse_registry_values_impl(registry_values).unwrap_or(HashMap::new())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lazy_static::lazy_static;
+    use std::sync::Mutex;
 
     impl Dst for Url {
         fn scheme(&self) -> &str {
@@ -794,52 +972,243 @@ mod tests {
             ProxyScheme::Http { auth, host } => {
                 assert_eq!(auth.unwrap(), encode_basic_auth("foo", "bar"));
                 assert_eq!(host, "localhost:1239");
-            },
+            }
             other => panic!("unexpected: {:?}", other),
         }
     }
 
+    // Smallest possible content for a mutex
+    struct MutexInner;
+
+    lazy_static! {
+        static ref ENVLOCK: Mutex<MutexInner> = Mutex::new(MutexInner);
+    }
+
     #[test]
     fn test_get_sys_proxies_parsing() {
+        // Stop other threads from modifying process-global ENV while we are.
+        let _lock = ENVLOCK.lock();
         // save system setting first.
         let _g1 = env_guard("HTTP_PROXY");
         let _g2 = env_guard("http_proxy");
 
-        // empty
-        assert_eq!(get_sys_proxies().contains_key("http"), false);
-
+        // Mock ENV, get the results, before doing assertions
+        // to avoid assert! -> panic! -> Mutex Poisoned.
+        let baseline_proxies = get_sys_proxies(None);
         // the system proxy setting url is invalid.
         env::set_var("http_proxy", "123465");
-        assert_eq!(get_sys_proxies().contains_key("http"), false);
-
+        let invalid_proxies = get_sys_proxies(None);
         // set valid proxy
         env::set_var("http_proxy", "http://127.0.0.1/");
-        let proxies = get_sys_proxies();
+        let valid_proxies = get_sys_proxies(None);
 
-        let p = &proxies["http"];
+        // reset user setting when guards drop
+        drop(_g1);
+        drop(_g2);
+        // Let other threads run now
+        drop(_lock);
+
+        assert_eq!(baseline_proxies.contains_key("http"), false);
+        assert_eq!(invalid_proxies.contains_key("http"), false);
+
+        let p = &valid_proxies["http"];
+        assert_eq!(p.scheme(), "http");
+        assert_eq!(p.host(), "127.0.0.1");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn test_get_sys_proxies_registry_parsing() {
+        // Stop other threads from modifying process-global ENV while we are.
+        let _lock = ENVLOCK.lock();
+        // save system setting first.
+        let _g1 = env_guard("HTTP_PROXY");
+        let _g2 = env_guard("http_proxy");
+
+        // Mock ENV, get the results, before doing assertions
+        // to avoid assert! -> panic! -> Mutex Poisoned.
+        let baseline_proxies = get_sys_proxies(None);
+        // the system proxy in the registry has been disabled
+        let disabled_proxies = get_sys_proxies(Some((0, String::from("http://127.0.0.1/"))));
+        // set valid proxy
+        let valid_proxies = get_sys_proxies(Some((1, String::from("http://127.0.0.1/"))));
+        let valid_proxies_no_schema = get_sys_proxies(Some((1, String::from("127.0.0.1"))));
+        let valid_proxies_explicit_https = get_sys_proxies(Some((1, String::from("https://127.0.0.1/"))));
+        let multiple_proxies = get_sys_proxies(Some((1, String::from("http=127.0.0.1:8888;https=127.0.0.2:8888"))));
+        let multiple_proxies_explicit_schema = get_sys_proxies(Some((1, String::from("http=http://127.0.0.1:8888;https=https://127.0.0.2:8888"))));
+
+        // reset user setting when guards drop
+        drop(_g1);
+        drop(_g2);
+        // Let other threads run now
+        drop(_lock);
+
+        assert_eq!(baseline_proxies.contains_key("http"), false);
+        assert_eq!(disabled_proxies.contains_key("http"), false);
+
+        let p = &valid_proxies["http"];
         assert_eq!(p.scheme(), "http");
         assert_eq!(p.host(), "127.0.0.1");
 
-        // reset user setting when guards drop
+        let p = &valid_proxies_no_schema["http"];
+        assert_eq!(p.scheme(), "http");
+        assert_eq!(p.host(), "127.0.0.1");
+
+        let p = &valid_proxies_no_schema["https"];
+        assert_eq!(p.scheme(), "http");
+        assert_eq!(p.host(), "127.0.0.1");
+
+        let p = &valid_proxies_explicit_https["https"];
+        assert_eq!(p.scheme(), "https");
+        assert_eq!(p.host(), "127.0.0.1");
+
+        let p = &multiple_proxies["http"];
+        assert_eq!(p.scheme(), "http");
+        assert_eq!(p.host(), "127.0.0.1:8888");
+
+        let p = &multiple_proxies["https"];
+        assert_eq!(p.scheme(), "http");
+        assert_eq!(p.host(), "127.0.0.2:8888");
+
+        let p = &multiple_proxies_explicit_schema["http"];
+        assert_eq!(p.scheme(), "http");
+        assert_eq!(p.host(), "127.0.0.1:8888");
+
+        let p = &multiple_proxies_explicit_schema["https"];
+        assert_eq!(p.scheme(), "https");
+        assert_eq!(p.host(), "127.0.0.2:8888");
     }
 
     #[test]
     fn test_get_sys_proxies_in_cgi() {
+        // Stop other threads from modifying process-global ENV while we are.
+        let _lock = ENVLOCK.lock();
         // save system setting first.
         let _g1 = env_guard("REQUEST_METHOD");
         let _g2 = env_guard("HTTP_PROXY");
 
-
+        // Mock ENV, get the results, before doing assertions
+        // to avoid assert! -> panic! -> Mutex Poisoned.
         env::set_var("HTTP_PROXY", "http://evil/");
 
-        // not in CGI yet
-        assert_eq!(get_sys_proxies()["http"].host(), "evil");
-
+        let baseline_proxies = get_sys_proxies(None);
         // set like we're in CGI
         env::set_var("REQUEST_METHOD", "GET");
-        assert!(!get_sys_proxies().contains_key("http"));
+
+        let cgi_proxies = get_sys_proxies(None);
 
         // reset user setting when guards drop
+        drop(_g1);
+        drop(_g2);
+        // Let other threads run now
+        drop(_lock);
+
+        // not in CGI yet
+        assert_eq!(baseline_proxies["http"].host(), "evil");
+        // In CGI
+        assert!(!cgi_proxies.contains_key("http"));
+    }
+
+    #[test]
+    fn test_sys_no_proxy() {
+        // Stop other threads from modifying process-global ENV while we are.
+        let _lock = ENVLOCK.lock();
+        // save system setting first.
+        let _g1 = env_guard("HTTP_PROXY");
+        let _g2 = env_guard("NO_PROXY");
+
+        let target = "http://example.domain/";
+        env::set_var("HTTP_PROXY", target);
+
+        env::set_var(
+            "NO_PROXY",
+            ".foo.bar,bar.baz,10.42.1.1/24,::1,10.124.7.8,2001::/17",
+        );
+
+        // Manually construct this so we aren't use the cache
+        let mut p = Proxy::new(Intercept::System(Arc::new(get_sys_proxies(None))));
+        p.no_proxy = NoProxy::new();
+
+        assert_eq!(intercepted_uri(&p, "http://hyper.rs"), target);
+        assert_eq!(intercepted_uri(&p, "http://foo.bar.baz"), target);
+        assert_eq!(intercepted_uri(&p, "http://10.43.1.1"), target);
+        assert_eq!(intercepted_uri(&p, "http://10.124.7.7"), target);
+        assert_eq!(intercepted_uri(&p, "http://[ffff:db8:a0b:12f0::1]"), target);
+        assert_eq!(intercepted_uri(&p, "http://[2005:db8:a0b:12f0::1]"), target);
+
+        assert!(p.intercept(&url("http://hello.foo.bar")).is_none());
+        assert!(p.intercept(&url("http://bar.baz")).is_none());
+        assert!(p.intercept(&url("http://10.42.1.100")).is_none());
+        assert!(p.intercept(&url("http://[::1]")).is_none());
+        assert!(p.intercept(&url("http://[2001:db8:a0b:12f0::1]")).is_none());
+        assert!(p.intercept(&url("http://10.124.7.8")).is_none());
+
+        // reset user setting when guards drop
+        drop(_g1);
+        drop(_g2);
+        // Let other threads run now
+        drop(_lock);
+    }
+
+    #[test]
+    fn test_no_proxy_load() {
+        // Stop other threads from modifying process-global ENV while we are.
+        let _lock = ENVLOCK.lock();
+
+        let _g1 = env_guard("no_proxy");
+        let domain = "lower.case";
+        env::set_var("no_proxy", domain);
+        // Manually construct this so we aren't use the cache
+        let mut p = Proxy::new(Intercept::System(Arc::new(get_sys_proxies(None))));
+        p.no_proxy = NoProxy::new();
+        assert_eq!(
+            p.no_proxy.expect("should have a no proxy set").domains.0[0],
+            domain
+        );
+
+        env::remove_var("no_proxy");
+        let _g2 = env_guard("NO_PROXY");
+        let domain = "upper.case";
+        env::set_var("NO_PROXY", domain);
+        // Manually construct this so we aren't use the cache
+        let mut p = Proxy::new(Intercept::System(Arc::new(get_sys_proxies(None))));
+        p.no_proxy = NoProxy::new();
+        assert_eq!(
+            p.no_proxy.expect("should have a no proxy set").domains.0[0],
+            domain
+        );
+
+        let _g3 = env_guard("HTTP_PROXY");
+        env::remove_var("NO_PROXY");
+        env::remove_var("no_proxy");
+        let target = "http://example.domain/";
+        env::set_var("HTTP_PROXY", target);
+
+        // Manually construct this so we aren't use the cache
+        let mut p = Proxy::new(Intercept::System(Arc::new(get_sys_proxies(None))));
+        p.no_proxy = NoProxy::new();
+        assert!(p.no_proxy.is_none(), "NoProxy shouldn't have been created");
+
+        assert_eq!(intercepted_uri(&p, "http://hyper.rs"), target);
+
+        // reset user setting when guards drop
+        drop(_g1);
+        drop(_g2);
+        drop(_g3);
+        // Let other threads run now
+        drop(_lock);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn test_type_prefix_extraction() {
+        assert!(extract_type_prefix("test").is_none());
+        assert!(extract_type_prefix("://test").is_none());
+        assert!(extract_type_prefix("some:prefix://test").is_none());
+        assert!(extract_type_prefix("some/prefix://test").is_none());
+
+        assert_eq!(extract_type_prefix("http://test").unwrap(), "http");
+        assert_eq!(extract_type_prefix("a://test").unwrap(), "a");
     }
 
     /// Guard an environment variable, resetting it to the original value
@@ -864,5 +1233,126 @@ mod tests {
                 env::remove_var(&self.name);
             }
         }
+    }
+
+    #[test]
+    fn test_has_http_auth() {
+        let http_proxy_with_auth = Proxy {
+            intercept: Intercept::Http(ProxyScheme::Http {
+                auth: Some(HeaderValue::from_static("auth1")),
+                host: http::uri::Authority::from_static("authority"),
+            }),
+            no_proxy: None,
+        };
+        assert_eq!(http_proxy_with_auth.maybe_has_http_auth(), true);
+        assert_eq!(
+            http_proxy_with_auth.http_basic_auth(&Uri::from_static("http://example.com")),
+            Some(HeaderValue::from_static("auth1"))
+        );
+
+        let http_proxy_without_auth = Proxy {
+            intercept: Intercept::Http(ProxyScheme::Http {
+                auth: None,
+                host: http::uri::Authority::from_static("authority"),
+            }),
+            no_proxy: None,
+        };
+        assert_eq!(http_proxy_without_auth.maybe_has_http_auth(), false);
+        assert_eq!(
+            http_proxy_without_auth.http_basic_auth(&Uri::from_static("http://example.com")),
+            None
+        );
+
+        let https_proxy_with_auth = Proxy {
+            intercept: Intercept::Http(ProxyScheme::Https {
+                auth: Some(HeaderValue::from_static("auth2")),
+                host: http::uri::Authority::from_static("authority"),
+            }),
+            no_proxy: None,
+        };
+        assert_eq!(https_proxy_with_auth.maybe_has_http_auth(), false);
+        assert_eq!(
+            https_proxy_with_auth.http_basic_auth(&Uri::from_static("http://example.com")),
+            None
+        );
+
+        let all_http_proxy_with_auth = Proxy {
+            intercept: Intercept::All(ProxyScheme::Http {
+                auth: Some(HeaderValue::from_static("auth3")),
+                host: http::uri::Authority::from_static("authority"),
+            }),
+            no_proxy: None,
+        };
+        assert_eq!(all_http_proxy_with_auth.maybe_has_http_auth(), true);
+        assert_eq!(
+            all_http_proxy_with_auth.http_basic_auth(&Uri::from_static("http://example.com")),
+            Some(HeaderValue::from_static("auth3"))
+        );
+
+        let all_https_proxy_with_auth = Proxy {
+            intercept: Intercept::All(ProxyScheme::Https {
+                auth: Some(HeaderValue::from_static("auth4")),
+                host: http::uri::Authority::from_static("authority"),
+            }),
+            no_proxy: None,
+        };
+        assert_eq!(all_https_proxy_with_auth.maybe_has_http_auth(), false);
+        assert_eq!(
+            all_https_proxy_with_auth.http_basic_auth(&Uri::from_static("http://example.com")),
+            None
+        );
+
+        let all_https_proxy_without_auth = Proxy {
+            intercept: Intercept::All(ProxyScheme::Https {
+                auth: None,
+                host: http::uri::Authority::from_static("authority"),
+            }),
+            no_proxy: None,
+        };
+        assert_eq!(all_https_proxy_without_auth.maybe_has_http_auth(), false);
+        assert_eq!(
+            all_https_proxy_without_auth.http_basic_auth(&Uri::from_static("http://example.com")),
+            None
+        );
+
+        let system_http_proxy_with_auth = Proxy {
+            intercept: Intercept::System(Arc::new({
+                let mut m = HashMap::new();
+                m.insert(
+                    "http".into(),
+                    ProxyScheme::Http {
+                        auth: Some(HeaderValue::from_static("auth5")),
+                        host: http::uri::Authority::from_static("authority"),
+                    },
+                );
+                m
+            })),
+            no_proxy: None,
+        };
+        assert_eq!(system_http_proxy_with_auth.maybe_has_http_auth(), true);
+        assert_eq!(
+            system_http_proxy_with_auth.http_basic_auth(&Uri::from_static("http://example.com")),
+            Some(HeaderValue::from_static("auth5"))
+        );
+
+        let system_https_proxy_with_auth = Proxy {
+            intercept: Intercept::System(Arc::new({
+                let mut m = HashMap::new();
+                m.insert(
+                    "https".into(),
+                    ProxyScheme::Https {
+                        auth: Some(HeaderValue::from_static("auth6")),
+                        host: http::uri::Authority::from_static("authority"),
+                    },
+                );
+                m
+            })),
+            no_proxy: None,
+        };
+        assert_eq!(system_https_proxy_with_auth.maybe_has_http_auth(), false);
+        assert_eq!(
+            system_https_proxy_with_auth.http_basic_auth(&Uri::from_static("http://example.com")),
+            None
+        );
     }
 }

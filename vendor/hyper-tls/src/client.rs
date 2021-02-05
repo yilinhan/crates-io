@@ -52,12 +52,26 @@ impl HttpsConnector<HttpConnector> {
     }
 }
 
+impl<T: Default> Default for HttpsConnector<T> {
+    fn default() -> Self {
+        Self::new_with_connector(Default::default())
+    }
+}
+
 impl<T> HttpsConnector<T> {
     /// Force the use of HTTPS when connecting.
     ///
     /// If a URL is not `https` when connecting, an error is returned.
     pub fn https_only(&mut self, enable: bool) {
         self.force_https = enable;
+    }
+    
+    /// With connector constructor
+    /// 
+    pub fn new_with_connector(http: T) -> Self {
+        native_tls::TlsConnector::new()
+            .map(|tls| HttpsConnector::from((http, tls.into())))
+            .unwrap_or_else(|e| panic!("HttpsConnector::new_with_connector(<connector>) failure: {}", e))
     }
 }
 
@@ -106,9 +120,7 @@ where
             return err(ForceHttpsButUriNotHttps.into());
         }
 
-        let host = dst.host()
-            .unwrap_or("")
-            .to_owned();
+        let host = dst.host().unwrap_or("").trim_matches(|c| c == '[' || c == ']').to_owned();
         let connecting = self.http.call(dst);
         let tls = self.tls.clone();
         let fut = async move {

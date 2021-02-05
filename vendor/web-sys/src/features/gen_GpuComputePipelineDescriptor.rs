@@ -4,7 +4,7 @@ use wasm_bindgen::prelude::*;
 #[cfg(web_sys_unstable_apis)]
 #[wasm_bindgen]
 extern "C" {
-    # [ wasm_bindgen ( extends = :: js_sys :: Object , js_name = GPUComputePipelineDescriptor ) ]
+    # [wasm_bindgen (extends = :: js_sys :: Object , js_name = GPUComputePipelineDescriptor)]
     #[derive(Debug, Clone, PartialEq, Eq)]
     #[doc = "The `GpuComputePipelineDescriptor` dictionary."]
     #[doc = ""]
@@ -16,20 +16,16 @@ extern "C" {
 }
 #[cfg(web_sys_unstable_apis)]
 impl GpuComputePipelineDescriptor {
-    #[cfg(all(
-        feature = "GpuPipelineLayout",
-        feature = "GpuProgrammableStageDescriptor",
-    ))]
+    #[cfg(feature = "GpuProgrammableStageDescriptor")]
     #[doc = "Construct a new `GpuComputePipelineDescriptor`."]
     #[doc = ""]
-    #[doc = "*This API requires the following crate features to be activated: `GpuComputePipelineDescriptor`, `GpuPipelineLayout`, `GpuProgrammableStageDescriptor`*"]
+    #[doc = "*This API requires the following crate features to be activated: `GpuComputePipelineDescriptor`, `GpuProgrammableStageDescriptor`*"]
     #[doc = ""]
     #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
     #[doc = "[described in the `wasm-bindgen` guide](https://rustwasm.github.io/docs/wasm-bindgen/web-sys/unstable-apis.html)*"]
-    pub fn new(layout: &GpuPipelineLayout, compute_stage: &GpuProgrammableStageDescriptor) -> Self {
+    pub fn new(compute_stage: &GpuProgrammableStageDescriptor) -> Self {
         #[allow(unused_mut)]
         let mut ret: Self = ::wasm_bindgen::JsCast::unchecked_into(::js_sys::Object::new());
-        ret.layout(layout);
         ret.compute_stage(compute_stage);
         ret
     }

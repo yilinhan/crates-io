@@ -1,10 +1,10 @@
+use cfg_if::cfg_if;
 use libc::{self, c_int};
-use Result;
-use errno::Errno;
+use crate::Result;
+use crate::errno::Errno;
+use crate::unistd::Pid;
+use crate::sys::signal::Signal;
 use std::convert::TryFrom;
-use unistd::Pid;
-
-use sys::signal::Signal;
 
 libc_bitflags!(
     pub struct WaitPidFlag: c_int {
@@ -15,6 +15,7 @@ libc_bitflags!(
                   target_os = "haiku",
                   target_os = "ios",
                   target_os = "linux",
+                  target_os = "redox",
                   target_os = "macos",
                   target_os = "netbsd"))]
         WEXITED;
@@ -24,6 +25,7 @@ libc_bitflags!(
                   target_os = "haiku",
                   target_os = "ios",
                   target_os = "linux",
+                  target_os = "redox",
                   target_os = "macos",
                   target_os = "netbsd"))]
         WSTOPPED;
@@ -33,16 +35,17 @@ libc_bitflags!(
                   target_os = "haiku",
                   target_os = "ios",
                   target_os = "linux",
+                  target_os = "redox",
                   target_os = "macos",
                   target_os = "netbsd"))]
         WNOWAIT;
         /// Don't wait on children of other threads in this group
-        #[cfg(any(target_os = "android", target_os = "linux"))]
+        #[cfg(any(target_os = "android", target_os = "linux", target_os = "redox"))]
         __WNOTHREAD;
         /// Wait on all children, regardless of type
-        #[cfg(any(target_os = "android", target_os = "linux"))]
+        #[cfg(any(target_os = "android", target_os = "linux", target_os = "redox"))]
         __WALL;
-        #[cfg(any(target_os = "android", target_os = "linux"))]
+        #[cfg(any(target_os = "android", target_os = "linux", target_os = "redox"))]
         __WCLONE;
     }
 );

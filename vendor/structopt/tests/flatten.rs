@@ -8,6 +8,8 @@
 
 use structopt::StructOpt;
 
+mod utils;
+
 #[test]
 fn flatten() {
     #[derive(StructOpt, PartialEq, Debug)]
@@ -126,4 +128,55 @@ fn merge_subcommands_with_flatten() {
         Opt::Command2(Command2 { arg2: 43 }),
         Opt::from_iter(&["test", "command2", "43"])
     );
+}
+
+#[test]
+#[should_panic = "structopt misuse: You likely tried to #[flatten] a struct \
+                  that contains #[subcommand]. This is forbidden."]
+fn subcommand_in_flatten() {
+    #[derive(Debug, StructOpt)]
+    pub enum Struct1 {
+        #[structopt(flatten)]
+        Struct1(Struct2),
+    }
+
+    #[derive(Debug, StructOpt)]
+    pub struct Struct2 {
+        #[structopt(subcommand)]
+        command_type: Enum3,
+    }
+
+    #[derive(Debug, StructOpt)]
+    pub enum Enum3 {
+        Command { args: Vec<String> },
+    }
+
+    Struct1::from_iter(&["test", "command", "foo"]);
+}
+
+#[test]
+fn flatten_doc_comment() {
+    #[derive(StructOpt, PartialEq, Debug)]
+    struct Common {
+        /// This is an arg. Arg means "argument". Command line argument.
+        arg: i32,
+    }
+
+    #[derive(StructOpt, PartialEq, Debug)]
+    struct Opt {
+        /// The very important comment that clippy had me put here.
+        /// It knows better.
+        #[structopt(flatten)]
+        common: Common,
+    }
+    assert_eq!(
+        Opt {
+            common: Common { arg: 42 }
+        },
+        Opt::from_iter(&["test", "42"])
+    );
+
+    let help = utils::get_help::<Opt>();
+    assert!(help.contains("This is an arg."));
+    assert!(!help.contains("The very important"));
 }

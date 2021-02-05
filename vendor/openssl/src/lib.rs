@@ -53,6 +53,7 @@
 //! * `OPENSSL_STATIC` - If set, the crate will statically link to OpenSSL rather than dynamically link.
 //! * `OPENSSL_LIBS` - If set, a `:`-separated list of library names to link to (e.g. `ssl:crypto`). This can be used
 //!     if nonstandard library names were used for whatever reason.
+//! * `OPENSSL_NO_VENDOR` - If set, always find OpenSSL in the system, even if the `vendored` feature is enabled.
 //!
 //! Additionally, these variables can be prefixed with the upper-cased target architecture (e.g.
 //!     `X86_64_UNKNOWN_LINUX_GNU_OPENSSL_DIR`), which can be useful when cross compiling.
@@ -142,7 +143,7 @@ pub mod aes;
 pub mod asn1;
 pub mod base64;
 pub mod bn;
-#[cfg(not(libressl))]
+#[cfg(all(not(libressl), not(osslconf = "OPENSSL_NO_CMS")))]
 pub mod cms;
 pub mod conf;
 pub mod derive;
@@ -150,6 +151,7 @@ pub mod dh;
 pub mod dsa;
 pub mod ec;
 pub mod ecdsa;
+pub mod encrypt;
 pub mod envelope;
 pub mod error;
 pub mod ex_data;

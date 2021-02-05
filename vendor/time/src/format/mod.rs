@@ -2,54 +2,32 @@
 
 /// Pad a given value if requested.
 macro_rules! pad {
-    ($f:ident, $padding:ident(None), $width:literal, $value:expr) => {
-        match $padding {
-            Padding::None | Padding::Default => write!($f, "{}", $value),
-            Padding::Space => write!($f, concat!("{:", stringify!($width), "}"), $value),
-            Padding::Zero => write!($f, concat!("{:0", stringify!($width), "}"), $value),
-        }
-    };
-
-    ($f:ident, $padding:ident(Space), $width:literal, $value:expr) => {
-        match $padding {
-            Padding::None => write!($f, "{}", $value),
-            Padding::Space | Padding::Default => {
-                write!($f, concat!("{:", stringify!($width), "}"), $value)
-            }
-            Padding::Zero => write!($f, concat!("{:0", stringify!($width), "}"), $value),
-        }
-    };
-
-    ($f:ident, $padding:ident(Zero), $width:literal, $value:expr) => {
+    ($f:ident, $padding:ident, $width:literal, $value:expr) => {
         match $padding {
             Padding::None => write!($f, "{}", $value),
             Padding::Space => write!($f, concat!("{:", stringify!($width), "}"), $value),
-            Padding::Zero | Padding::Default => {
-                write!($f, concat!("{:0", stringify!($width), "}"), $value)
-            }
+            Padding::Zero => write!($f, concat!("{:0", stringify!($width), "}"), $value),
         }
     };
 }
 
 pub(crate) mod date;
+pub(crate) mod deferred_format;
+#[allow(clippy::module_inception)]
+pub(crate) mod format;
 pub(crate) mod offset;
 pub(crate) mod parse;
 pub(crate) mod parse_items;
 pub(crate) mod time;
+pub(crate) mod well_known;
 
-use crate::internal_prelude::*;
-use core::fmt::{self, Display, Formatter};
+use crate::{error, Date, Time, UtcOffset};
+use core::fmt::Formatter;
+pub(crate) use deferred_format::DeferredFormat;
 #[allow(unreachable_pub)] // rust-lang/rust#64762
-pub use parse::ParseError;
+pub use format::Format;
 pub(crate) use parse::{parse, ParseResult, ParsedItems};
 pub(crate) use parse_items::{parse_fmt_string, try_parse_fmt_string};
-
-/// Checks if a user-provided formatting string is valid. If it isn't, a
-/// description of the error is returned.
-#[inline(always)]
-pub fn validate_format_string(s: impl AsRef<str>) -> Result<(), String> {
-    try_parse_fmt_string(s.as_ref()).map(|_| ())
-}
 
 /// The type of padding to use when formatting.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -60,19 +38,6 @@ pub(crate) enum Padding {
     Space,
     /// Pad to the requisite width using zeros.
     Zero,
-    /// Use the default padding for the specifier. Varies by specifier.
-    Default,
-}
-
-impl Padding {
-    /// Map the default value to a provided alternative.
-    #[inline(always)]
-    pub(crate) fn default_to(self, value: Self) -> Self {
-        match self {
-            Padding::Default => value,
-            _ => self,
-        }
-    }
 }
 
 /// Specifiers are similar to C's `strftime`, with some omissions and changes.
@@ -121,26 +86,22 @@ pub(crate) enum Specifier {
 
 /// Given all the information necessary, write the provided specifier to the
 /// formatter.
-#[inline]
 fn format_specifier(
     f: &mut Formatter<'_>,
     date: Option<Date>,
     time: Option<Time>,
     offset: Option<UtcOffset>,
     specifier: Specifier,
-) -> fmt::Result {
+) -> Result<(), error::Format> {
     /// Push the provided specifier to the list of items.
     macro_rules! specifier {
         ($type:ident :: $specifier_fn:ident ( $specifier:ident $(, $param:expr)? )) => {
             $type::$specifier_fn(
                 f,
-                $type.expect(concat!(
-                    "Specifier `%",
-                    stringify!($specifier),
-                    "` requires a ",
-                    stringify!($type),
-                    " to be present."
-                )),
+                match $type {
+                    Some(v) => v,
+                    None => return Err(error::Format::InsufficientTypeInformation),
+                },
                 $($param)?
             )?
         };
@@ -167,9 +128,9 @@ fn format_specifier(
             literal!(" ");
             specifier!(time::fmt_H(H, Padding::None));
             literal!(":");
-            specifier!(time::fmt_M(M, Padding::Default));
+            specifier!(time::fmt_M(M, Padding::Zero));
             literal!(":");
-            specifier!(time::fmt_S(S, Padding::Default));
+            specifier!(time::fmt_S(S, Padding::Zero));
             literal!(" ");
             specifier!(date::fmt_Y(Y, Padding::None));
         }
@@ -178,16 +139,16 @@ fn format_specifier(
         D => {
             specifier!(date::fmt_m(m, Padding::None));
             literal!("/");
-            specifier!(date::fmt_d(d, Padding::Default));
+            specifier!(date::fmt_d(d, Padding::Zero));
             literal!("/");
-            specifier!(date::fmt_y(y, Padding::Default));
+            specifier!(date::fmt_y(y, Padding::Zero));
         }
         F => {
             specifier!(date::fmt_Y(Y, Padding::None));
             literal!("-");
-            specifier!(date::fmt_m(m, Padding::Default));
+            specifier!(date::fmt_m(m, Padding::Zero));
             literal!("-");
-            specifier!(date::fmt_d(d, Padding::Default));
+            specifier!(date::fmt_d(d, Padding::Zero));
         }
         g { padding } => specifier!(date::fmt_g(g, padding)),
         G { padding } => specifier!(date::fmt_G(G, padding)),
@@ -202,24 +163,24 @@ fn format_specifier(
         r => {
             specifier!(time::fmt_I(I, Padding::None));
             literal!(":");
-            specifier!(time::fmt_M(M, Padding::Default));
+            specifier!(time::fmt_M(M, Padding::Zero));
             literal!(":");
-            specifier!(time::fmt_S(S, Padding::Default));
+            specifier!(time::fmt_S(S, Padding::Zero));
             literal!(" ");
             specifier!(time::fmt_p(p));
         }
         R => {
             specifier!(time::fmt_H(H, Padding::None));
             literal!(":");
-            specifier!(time::fmt_M(M, Padding::Default));
+            specifier!(time::fmt_M(M, Padding::Zero));
         }
         S { padding } => specifier!(time::fmt_S(S, padding)),
         T => {
             specifier!(time::fmt_H(H, Padding::None));
             literal!(":");
-            specifier!(time::fmt_M(M, Padding::Default));
+            specifier!(time::fmt_M(M, Padding::Zero));
             literal!(":");
-            specifier!(time::fmt_S(S, Padding::Default));
+            specifier!(time::fmt_S(S, Padding::Zero));
         }
         u => specifier!(date::fmt_u(u)),
         U { padding } => specifier!(date::fmt_U(U, padding)),
@@ -242,70 +203,4 @@ pub(crate) enum FormatItem<'a> {
     Literal(&'a str),
     /// A value that needs to be interpreted when formatting.
     Specifier(Specifier),
-}
-
-/// A struct containing all the necessary information to display the inner type.
-#[allow(single_use_lifetimes)]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct DeferredFormat<'a> {
-    /// The `Date` to use for formatting.
-    date: Option<Date>,
-    /// The `Time` to use for formatting.
-    time: Option<Time>,
-    /// The `UtcOffset` to use for formatting.
-    offset: Option<UtcOffset>,
-    /// The list of items used to display the item.
-    format: Vec<FormatItem<'a>>,
-}
-
-impl<'a> DeferredFormat<'a> {
-    /// Create a new `DeferredFormat` with the provided formatting string.
-    pub(crate) fn new(format: &'a str) -> Self {
-        Self {
-            date: None,
-            time: None,
-            offset: None,
-            format: parse_fmt_string(format),
-        }
-    }
-
-    /// Provide the `Date` component.
-    pub(crate) fn with_date(self, date: Date) -> Self {
-        Self {
-            date: Some(date),
-            ..self
-        }
-    }
-
-    /// Provide the `Time` component.
-    pub(crate) fn with_time(self, time: Time) -> Self {
-        Self {
-            time: Some(time),
-            ..self
-        }
-    }
-
-    /// Provide the `UtCOffset` component.
-    pub(crate) fn with_offset(self, offset: UtcOffset) -> Self {
-        Self {
-            offset: Some(offset),
-            ..self
-        }
-    }
-}
-
-impl Display for DeferredFormat<'_> {
-    #[inline(always)]
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        for item in &self.format {
-            match item {
-                FormatItem::Literal(value) => f.write_str(value)?,
-                FormatItem::Specifier(specifier) => {
-                    format_specifier(f, self.date, self.time, self.offset, *specifier)?
-                }
-            }
-        }
-
-        Ok(())
-    }
 }

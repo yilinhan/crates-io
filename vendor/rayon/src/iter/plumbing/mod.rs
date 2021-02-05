@@ -1,6 +1,6 @@
 //! Traits and functions used to implement parallel iteration.  These are
 //! low-level details -- users of parallel iterators should not need to
-//! interact with them directly.  See [the `plumbing` README][r] for a high-level overview.
+//! interact with them directly.  See [the `plumbing` README][r] for a general overview.
 //!
 //! [r]: https://github.com/rayon-rs/rayon/blob/master/src/iter/plumbing/README.md
 
@@ -300,7 +300,7 @@ struct LengthSplitter {
 }
 
 impl LengthSplitter {
-    /// Create a new splitter based on lengths.
+    /// Creates a new splitter based on lengths.
     ///
     /// The `min` is a hard lower bound.  We'll never split below that, but
     /// of course an iterator might start out smaller already.

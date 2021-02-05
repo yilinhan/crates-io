@@ -31,7 +31,7 @@ use ssl::{ClientHelloResponse, ExtensionContext};
 use ssl::{
     Error, HandshakeError, MidHandshakeSslStream, ShutdownResult, ShutdownState, Ssl, SslAcceptor,
     SslAcceptorBuilder, SslConnector, SslContext, SslContextBuilder, SslFiletype, SslMethod,
-    SslOptions, SslSessionCacheMode, SslStream, SslStreamBuilder, SslVerifyMode, StatusType,
+    SslOptions, SslSessionCacheMode, SslStream, SslVerifyMode, StatusType,
 };
 #[cfg(ossl102)]
 use x509::store::X509StoreBuilder;
@@ -41,9 +41,9 @@ use x509::{X509Name, X509StoreContext, X509VerifyResult, X509};
 
 mod server;
 
-static ROOT_CERT: &'static [u8] = include_bytes!("../../../test/root-ca.pem");
-static CERT: &'static [u8] = include_bytes!("../../../test/cert.pem");
-static KEY: &'static [u8] = include_bytes!("../../../test/key.pem");
+static ROOT_CERT: &[u8] = include_bytes!("../../../test/root-ca.pem");
+static CERT: &[u8] = include_bytes!("../../../test/cert.pem");
+static KEY: &[u8] = include_bytes!("../../../test/key.pem");
 
 #[test]
 fn verify_untrusted() {
@@ -321,10 +321,9 @@ fn test_connect_with_srtp_ctx() {
             .unwrap();
         ctx.set_private_key_file(&Path::new("test/key.pem"), SslFiletype::PEM)
             .unwrap();
-        let ssl = Ssl::new(&ctx.build()).unwrap();
-        let mut builder = SslStreamBuilder::new(ssl, stream);
-        builder.set_dtls_mtu_size(1500);
-        let mut stream = builder.accept().unwrap();
+        let mut ssl = Ssl::new(&ctx.build()).unwrap();
+        ssl.set_mtu(1500).unwrap();
+        let mut stream = ssl.accept(stream).unwrap();
 
         let mut buf = [0; 60];
         stream
@@ -341,10 +340,9 @@ fn test_connect_with_srtp_ctx() {
     let mut ctx = SslContext::builder(SslMethod::dtls()).unwrap();
     ctx.set_tlsext_use_srtp("SRTP_AES128_CM_SHA1_80:SRTP_AES128_CM_SHA1_32")
         .unwrap();
-    let ssl = Ssl::new(&ctx.build()).unwrap();
-    let mut builder = SslStreamBuilder::new(ssl, stream);
-    builder.set_dtls_mtu_size(1500);
-    let mut stream = builder.connect().unwrap();
+    let mut ssl = Ssl::new(&ctx.build()).unwrap();
+    ssl.set_mtu(1500).unwrap();
+    let mut stream = ssl.connect(stream).unwrap();
 
     let mut buf = [1; 60];
     {
@@ -385,7 +383,7 @@ fn test_connect_with_srtp_ssl() {
             .unwrap();
         let mut profilenames = String::new();
         for profile in ssl.srtp_profiles().unwrap() {
-            if profilenames.len() > 0 {
+            if !profilenames.is_empty() {
                 profilenames.push(':');
             }
             profilenames += profile.name();
@@ -394,9 +392,8 @@ fn test_connect_with_srtp_ssl() {
             "SRTP_AES128_CM_SHA1_80:SRTP_AES128_CM_SHA1_32",
             profilenames
         );
-        let mut builder = SslStreamBuilder::new(ssl, stream);
-        builder.set_dtls_mtu_size(1500);
-        let mut stream = builder.accept().unwrap();
+        ssl.set_mtu(1500).unwrap();
+        let mut stream = ssl.accept(stream).unwrap();
 
         let mut buf = [0; 60];
         stream
@@ -414,9 +411,8 @@ fn test_connect_with_srtp_ssl() {
     let mut ssl = Ssl::new(&ctx.build()).unwrap();
     ssl.set_tlsext_use_srtp("SRTP_AES128_CM_SHA1_80:SRTP_AES128_CM_SHA1_32")
         .unwrap();
-    let mut builder = SslStreamBuilder::new(ssl, stream);
-    builder.set_dtls_mtu_size(1500);
-    let mut stream = builder.connect().unwrap();
+    ssl.set_mtu(1500).unwrap();
+    let mut stream = ssl.connect(stream).unwrap();
 
     let mut buf = [1; 60];
     {
@@ -558,6 +554,7 @@ fn read_panic() {
 }
 
 #[test]
+#[cfg_attr(libressl321, ignore)]
 #[should_panic(expected = "blammo")]
 fn flush_panic() {
     struct ExplodingStream(TcpStream);
@@ -603,6 +600,7 @@ fn refcount_ssl_context() {
 
 #[test]
 #[cfg_attr(libressl250, ignore)]
+#[cfg_attr(target_os = "windows", ignore)]
 #[cfg_attr(all(target_os = "macos", feature = "vendored"), ignore)]
 fn default_verify_paths() {
     let mut ctx = SslContext::builder(SslMethod::tls()).unwrap();
@@ -844,6 +842,7 @@ fn cert_store() {
 }
 
 #[test]
+#[cfg_attr(libressl321, ignore)]
 fn tmp_dh_callback() {
     static CALLED_BACK: AtomicBool = AtomicBool::new(false);
 
@@ -890,6 +889,7 @@ fn tmp_ecdh_callback() {
 }
 
 #[test]
+#[cfg_attr(libressl321, ignore)]
 fn tmp_dh_callback_ssl() {
     static CALLED_BACK: AtomicBool = AtomicBool::new(false);
 
@@ -947,6 +947,7 @@ fn idle_session() {
 }
 
 #[test]
+#[cfg_attr(libressl321, ignore)]
 fn active_session() {
     let server = Server::builder().build();
 
@@ -1002,6 +1003,7 @@ fn status_callbacks() {
 }
 
 #[test]
+#[cfg_attr(libressl321, ignore)]
 fn new_session_callback() {
     static CALLED_BACK: AtomicBool = AtomicBool::new(false);
 
@@ -1025,6 +1027,7 @@ fn new_session_callback() {
 }
 
 #[test]
+#[cfg_attr(libressl321, ignore)]
 fn new_session_callback_swapped_ctx() {
     static CALLED_BACK: AtomicBool = AtomicBool::new(false);
 
@@ -1250,23 +1253,14 @@ fn stateless() {
         to.extend_incoming(&from.take_outgoing());
     }
 
-    fn hs<S: ::std::fmt::Debug>(
-        stream: Result<SslStream<S>, HandshakeError<S>>,
-    ) -> Result<SslStream<S>, MidHandshakeSslStream<S>> {
-        match stream {
-            Ok(stream) => Ok(stream),
-            Err(HandshakeError::WouldBlock(stream)) => Err(stream),
-            Err(e) => panic!("unexpected error: {:?}", e),
-        }
-    }
-
     //
     // Setup
     //
 
     let mut client_ctx = SslContext::builder(SslMethod::tls()).unwrap();
     client_ctx.clear_options(SslOptions::ENABLE_MIDDLEBOX_COMPAT);
-    let client_stream = Ssl::new(&client_ctx.build()).unwrap();
+    let mut client_stream =
+        SslStream::new(Ssl::new(&client_ctx.build()).unwrap(), MemoryStream::new()).unwrap();
 
     let mut server_ctx = SslContext::builder(SslMethod::tls()).unwrap();
     server_ctx
@@ -1282,35 +1276,35 @@ fn stateless() {
     });
     server_ctx.set_stateless_cookie_verify_cb(|_tls, buf| buf == COOKIE);
     let mut server_stream =
-        ssl::SslStreamBuilder::new(Ssl::new(&server_ctx.build()).unwrap(), MemoryStream::new());
+        SslStream::new(Ssl::new(&server_ctx.build()).unwrap(), MemoryStream::new()).unwrap();
 
     //
     // Handshake
     //
 
     // Initial ClientHello
-    let mut client_stream = hs(client_stream.connect(MemoryStream::new())).unwrap_err();
+    client_stream.connect().unwrap_err();
     send(client_stream.get_mut(), server_stream.get_mut());
     // HelloRetryRequest
     assert!(!server_stream.stateless().unwrap());
     send(server_stream.get_mut(), client_stream.get_mut());
     // Second ClientHello
-    let mut client_stream = hs(client_stream.handshake()).unwrap_err();
+    client_stream.do_handshake().unwrap_err();
     send(client_stream.get_mut(), server_stream.get_mut());
     // OldServerHello
     assert!(server_stream.stateless().unwrap());
-    let mut server_stream = hs(server_stream.accept()).unwrap_err();
+    server_stream.accept().unwrap_err();
     send(server_stream.get_mut(), client_stream.get_mut());
     // Finished
-    let mut client_stream = hs(client_stream.handshake()).unwrap();
+    client_stream.do_handshake().unwrap();
     send(client_stream.get_mut(), server_stream.get_mut());
-    hs(server_stream.handshake()).unwrap();
+    server_stream.do_handshake().unwrap();
 }
 
 #[cfg(not(osslconf = "OPENSSL_NO_PSK"))]
 #[test]
 fn psk_ciphers() {
-    const CIPHER: &'static str = "PSK-AES128-CBC-SHA";
+    const CIPHER: &str = "PSK-AES128-CBC-SHA";
     const PSK: &[u8] = b"thisisaverysecurekey";
     const CLIENT_IDENT: &[u8] = b"thisisaclient";
     static CLIENT_CALLED: AtomicBool = AtomicBool::new(false);

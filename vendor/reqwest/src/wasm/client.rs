@@ -1,19 +1,44 @@
-use http::Method;
-use js_sys::Uint8Array;
-use std::future::Future;
-use wasm_bindgen::UnwrapThrowExt as _;
+use http::{HeaderMap, Method};
+use js_sys::Promise;
+use std::{fmt, future::Future, sync::Arc};
 use url::Url;
+use wasm_bindgen::prelude::{wasm_bindgen, UnwrapThrowExt as _};
 
 use super::{Request, RequestBuilder, Response};
 use crate::IntoUrl;
 
-/// dox
-#[derive(Clone, Debug)]
-pub struct Client(());
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_name = fetch)]
+    fn fetch_with_request(input: &web_sys::Request) -> Promise;
+}
+
+fn js_fetch(req: &web_sys::Request) -> Promise {
+    use wasm_bindgen::{JsCast, JsValue};
+    let global = js_sys::global();
+
+    if let Some(true) =
+        js_sys::Reflect::has(&global, &JsValue::from_str("ServiceWorkerGlobalScope")).ok()
+    {
+        global
+            .unchecked_into::<web_sys::ServiceWorkerGlobalScope>()
+            .fetch_with_request(req)
+    } else {
+        // browser
+        fetch_with_request(req)
+    }
+}
 
 /// dox
-#[derive(Debug)]
-pub struct ClientBuilder(());
+#[derive(Clone)]
+pub struct Client {
+    config: Arc<Config>,
+}
+
+/// dox
+pub struct ClientBuilder {
+    config: Config,
+}
 
 impl Client {
     /// dox
@@ -93,10 +118,43 @@ impl Client {
         RequestBuilder::new(self.clone(), req)
     }
 
+    /// Executes a `Request`.
+    ///
+    /// A `Request` can be built manually with `Request::new()` or obtained
+    /// from a RequestBuilder with `RequestBuilder::build()`.
+    ///
+    /// You should prefer to use the `RequestBuilder` and
+    /// `RequestBuilder::send()`.
+    ///
+    /// # Errors
+    ///
+    /// This method fails if there was an error while sending request,
+    /// redirect loop was detected or redirect limit was exhausted.
+    pub fn execute(
+        &self,
+        request: Request,
+    ) -> impl Future<Output = Result<Response, crate::Error>> {
+        self.execute_request(request)
+    }
+
+    // merge request headers with Client default_headers, prior to external http fetch
+    fn merge_headers(&self, req: &mut Request) {
+        use http::header::Entry;
+        let headers: &mut HeaderMap = req.headers_mut();
+        // insert default headers in the request headers
+        // without overwriting already appended headers.
+        for (key, value) in self.config.headers.iter() {
+            if let Entry::Vacant(entry) = headers.entry(key) {
+                entry.insert(value.clone());
+            }
+        }
+    }
+
     pub(super) fn execute_request(
         &self,
-        req: Request,
+        mut req: Request,
     ) -> impl Future<Output = crate::Result<Response>> {
+        self.merge_headers(&mut req);
         fetch(req)
     }
 }
@@ -107,11 +165,28 @@ impl Default for Client {
     }
 }
 
+impl fmt::Debug for Client {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut builder = f.debug_struct("Client");
+        self.config.fmt_fields(&mut builder);
+        builder.finish()
+    }
+}
+
+impl fmt::Debug for ClientBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let mut builder = f.debug_struct("ClientBuilder");
+        self.config.fmt_fields(&mut builder);
+        builder.finish()
+    }
+}
+
 async fn fetch(req: Request) -> crate::Result<Response> {
     // Build the js Request
     let mut init = web_sys::RequestInit::new();
     init.method(req.method().as_str());
 
+    // convert HeaderMap to Headers
     let js_headers = web_sys::Headers::new()
         .map_err(crate::error::wasm)
         .map_err(crate::error::builder)?;
@@ -133,9 +208,9 @@ async fn fetch(req: Request) -> crate::Result<Response> {
     }
 
     if let Some(body) = req.body() {
-        let body_bytes: &[u8] = body.bytes();
-        let body_array: Uint8Array = body_bytes.into();
-        init.body(Some(&body_array.into()));
+        if !body.is_empty() {
+            init.body(Some(&body.to_js_value()?.as_ref().as_ref()));
+        }
     }
 
     let js_req = web_sys::Request::new_with_str_and_init(req.url().as_str(), &init)
@@ -143,16 +218,13 @@ async fn fetch(req: Request) -> crate::Result<Response> {
         .map_err(crate::error::builder)?;
 
     // Await the fetch() promise
-    let p = web_sys::window()
-        .expect("window should exist")
-        .fetch_with_request(&js_req);
+    let p = js_fetch(&js_req);
     let js_resp = super::promise::<web_sys::Response>(p)
         .await
         .map_err(crate::error::request)?;
 
     // Convert from the js Response
-    let mut resp = http::Response::builder()
-        .status(js_resp.status());
+    let mut resp = http::Response::builder().status(js_resp.status());
 
     let url = Url::parse(&js_resp.url()).expect_throw("url parse");
 
@@ -180,17 +252,121 @@ async fn fetch(req: Request) -> crate::Result<Response> {
 impl ClientBuilder {
     /// dox
     pub fn new() -> Self {
-        ClientBuilder(())
+        ClientBuilder {
+            config: Config::default(),
+        }
     }
 
-    /// dox
-    pub fn build(self) -> Result<Client, crate::Error> {
-        Ok(Client(()))
+    /// Returns a 'Client' that uses this ClientBuilder configuration
+    pub fn build(mut self) -> Result<Client, crate::Error> {
+        let config = std::mem::take(&mut self.config);
+        Ok(Client {
+            config: Arc::new(config),
+        })
+    }
+
+    /// Sets the default headers for every request
+    pub fn default_headers(mut self, headers: HeaderMap) -> ClientBuilder {
+        for (key, value) in headers.iter() {
+            self.config.headers.insert(key, value.clone());
+        }
+        self
     }
 }
 
 impl Default for ClientBuilder {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[derive(Clone, Debug)]
+struct Config {
+    headers: HeaderMap,
+}
+
+impl Default for Config {
+    fn default() -> Config {
+        Config {
+            headers: HeaderMap::new(),
+        }
+    }
+}
+
+impl Config {
+    fn fmt_fields(&self, f: &mut fmt::DebugStruct<'_, '_>) {
+        f.field("default_headers", &self.headers);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use wasm_bindgen_test::*;
+
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[wasm_bindgen_test]
+    async fn default_headers() {
+        use crate::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
+
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert("x-custom", HeaderValue::from_static("flibbertigibbet"));
+        let client = crate::Client::builder()
+            .default_headers(headers)
+            .build()
+            .expect("client");
+        let mut req = client
+            .get("https://www.example.com")
+            .build()
+            .expect("request");
+        // merge headers as if client were about to issue fetch
+        client.merge_headers(&mut req);
+
+        let test_headers = req.headers();
+        assert!(test_headers.get(CONTENT_TYPE).is_some(), "content-type");
+        assert!(test_headers.get("x-custom").is_some(), "custom header");
+        assert!(test_headers.get("accept").is_none(), "no accept header");
+    }
+
+    #[wasm_bindgen_test]
+    async fn default_headers_clone() {
+        use crate::header::{HeaderMap, HeaderValue, CONTENT_TYPE};
+
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+        headers.insert("x-custom", HeaderValue::from_static("flibbertigibbet"));
+        let client = crate::Client::builder()
+            .default_headers(headers)
+            .build()
+            .expect("client");
+
+        let mut req = client
+            .get("https://www.example.com")
+            .header(CONTENT_TYPE, "text/plain")
+            .build()
+            .expect("request");
+        client.merge_headers(&mut req);
+        let headers1 = req.headers();
+
+        // confirm that request headers override defaults
+        assert_eq!(
+            headers1.get(CONTENT_TYPE).unwrap(),
+            "text/plain",
+            "request headers override defaults"
+        );
+
+        // confirm that request headers don't change client defaults
+        let mut req2 = client
+            .get("https://www.example.com/x")
+            .build()
+            .expect("req 2");
+        client.merge_headers(&mut req2);
+        let headers2 = req2.headers();
+        assert_eq!(
+            headers2.get(CONTENT_TYPE).unwrap(),
+            "application/json",
+            "request headers don't change client defaults"
+        );
     }
 }

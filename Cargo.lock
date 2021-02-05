@@ -933,7 +933,7 @@ dependencies = [
 
 [[package]]
 name = "idna"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "matches 0.1.8 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -2714,7 +2714,7 @@ version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "form_urlencoded 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "idna 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "idna 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "matches 0.1.8 (registry+https://github.com/rust-lang/crates.io-index)",
  "percent-encoding 2.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
@@ -3063,7 +3063,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 "checksum hyper 0.13.9 (registry+https://github.com/rust-lang/crates.io-index)" = "f6ad767baac13b44d4529fcf58ba2cd0995e36e7b435bc5b039de6f47e880dbf"
 "checksum hyper 0.14.2 (registry+https://github.com/rust-lang/crates.io-index)" = "12219dc884514cb4a6a03737f4413c0e01c23a1b059b0156004b23f1e19dccbe"
 "checksum hyper-tls 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)" = "d979acc56dcb5b8dddba3917601745e877576475aa046df3226eabdecef78eed"
-"checksum idna 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "02e2673c30ee86b5b96a9cb52ad15718aa1f966f5ab9ad54a8b95d5ca33120a9"
+"checksum idna 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)" = "de910d521f7cc3135c4de8db1cb910e0b5ed1dc6f57c381cd07e8e661ce10094"
 "checksum ignore 0.4.17 (registry+https://github.com/rust-lang/crates.io-index)" = "b287fb45c60bb826a0dc68ff08742b9d88a2fea13d6e0c286b3172065aaf878c"
 "checksum indexmap 1.6.1 (registry+https://github.com/rust-lang/crates.io-index)" = "4fb1fa934250de4de8aef298d81c729a7d33d8c239daa3a7575e6b92bfc7313b"
 "checksum inlinable_string 0.1.14 (registry+https://github.com/rust-lang/crates.io-index)" = "3094308123a0e9fd59659ce45e22de9f53fc1d2ac6e1feb9fef988e4f76cad77"

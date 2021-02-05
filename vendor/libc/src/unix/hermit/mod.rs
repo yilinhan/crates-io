@@ -1,13 +1,3 @@
-// Copyright 2018 The Rust Project Developers. See the COPYRIGHT
-// file at the top-level directory of this distribution and at
-// http://rust-lang.org/COPYRIGHT.
-//
-// Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
-// http://www.apache.org/licenses/LICENSE-2.0> or the MIT license
-// <LICENSE-MIT or http://opensource.org/licenses/MIT>, at your
-// option. This file may not be copied, modified, or distributed
-// except according to those terms.
-
 // liblibc port for HermitCore (https://hermitcore.org)
 // HermitCore is a unikernel based on lwIP, newlib, and
 // pthread-embedded.
@@ -949,16 +939,20 @@ const ULONG_SIZE: usize = 64;
 
 pub const WNOHANG: ::c_int = 0x00000001;
 
-f! {
-    pub fn WEXITSTATUS(status: ::c_int) -> ::c_int {
+pub const PRIO_PROCESS: ::c_int = 0;
+pub const PRIO_PGRP: ::c_int = 1;
+pub const PRIO_USER: ::c_int = 2;
+
+safe_f! {
+    pub {const} fn WEXITSTATUS(status: ::c_int) -> ::c_int {
         (status >> 8) & 0xff
     }
 
-    pub fn WIFEXITED(status: ::c_int) -> bool {
+    pub {const} fn WIFEXITED(status: ::c_int) -> bool {
         (status & 0xff) == 0
     }
 
-    pub fn WTERMSIG(status: ::c_int) -> ::c_int {
+    pub {const} fn WTERMSIG(status: ::c_int) -> ::c_int {
         status & 0x7f
     }
 }

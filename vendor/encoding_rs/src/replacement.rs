@@ -1,4 +1,4 @@
-// Copyright 2015-2016 Mozilla Foundation. See the COPYRIGHT
+// Copyright Mozilla Foundation. See the COPYRIGHT
 // file at the top-level directory of this distribution.
 //
 // Licensed under the Apache License, Version 2.0 <LICENSE-APACHE or
@@ -8,7 +8,7 @@
 // except according to those terms.
 
 use super::*;
-use variant::*;
+use crate::variant::*;
 
 pub struct ReplacementDecoder {
     emitted: bool,

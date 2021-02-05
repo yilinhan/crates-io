@@ -208,11 +208,6 @@ impl<S> MidHandshakeSslStream<S> {
         self.error.code() == errSSLWouldBlock
     }
 
-    /// Deprecated
-    pub fn reason(&self) -> OSStatus {
-        self.error.code()
-    }
-
     /// Returns the error which caused the handshake interruption.
     pub fn error(&self) -> &Error {
         &self.error
@@ -319,7 +314,7 @@ impl<S> MidHandshakeClientBuilder<S> {
                 }
             }
 
-            let err = Error::from_code(stream.reason());
+            let err = Error::from_code(stream.error().code());
             return Err(ClientHandshakeError::Failure(err));
         }
     }
@@ -429,7 +424,7 @@ declare_TCFType! {
 impl_TCFType!(SslContext, SSLContextRef, SSLContextGetTypeID);
 
 impl fmt::Debug for SslContext {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = fmt.debug_struct("SslContext");
         if let Ok(state) = self.state() {
             builder.field("state", &state);
@@ -651,16 +646,6 @@ impl SslContext {
         }
     }
 
-    #[allow(missing_docs)]
-    #[deprecated(since = "0.2.1", note = "use peer_trust2 instead")]
-    pub fn peer_trust(&self) -> Result<SecTrust> {
-        match self.peer_trust2() {
-            Ok(Some(trust)) => Ok(trust),
-            Ok(None) => panic!("no trust available"),
-            Err(e) => Err(e),
-        }
-    }
-
     /// Returns the state of the session.
     pub fn state(&self) -> Result<SessionState> {
         unsafe {
@@ -710,7 +695,7 @@ impl SslContext {
     /// Returns the set of protocols selected via ALPN if it succeeded.
     #[cfg(feature = "alpn")]
     pub fn alpn_protocols(&self) -> Result<Vec<String>> {
-        let mut array = ptr::null();
+        let mut array: CFArrayRef = ptr::null();
         unsafe {
             #[cfg(feature = "OSX_10_13")]
             {
@@ -766,6 +751,30 @@ impl SslContext {
         }
     }
 
+    /// Sets whether the client sends the `SessionTicket` extension in its `ClientHello`.
+    ///
+    /// On its own, this will just cause the client to send an empty `SessionTicket` extension on
+    /// every connection. [`SslContext::set_peer_id`] must also be used to key the session
+    /// ticket returned by the server.
+    ///
+    /// [`SslContext::set_peer_id`]: #method.set_peer_id
+    #[cfg(feature = "session-tickets")]
+    pub fn set_session_tickets_enabled(&mut self, enabled: bool) -> Result<()> {
+        #[cfg(feature = "OSX_10_13")]
+        {
+            unsafe { cvt(SSLSetSessionTicketsEnabled(self.0, enabled as Boolean)) }
+        }
+        #[cfg(not(feature = "OSX_10_13"))]
+        {
+            dlsym! { fn SSLSetSessionTicketsEnabled(SSLContextRef, Boolean) -> OSStatus }
+            if let Some(f) = SSLSetSessionTicketsEnabled.get() {
+                unsafe { cvt(f(self.0, enabled as Boolean)) }
+            } else {
+                Err(Error::from_code(errSecUnimplemented))
+            }
+        }
+    }
+
     /// Sets whether a protocol is enabled or not.
     ///
     /// # Note
@@ -774,6 +783,7 @@ impl SslContext {
     /// `set_protocol_version_min`, although if you're working with OSX 10.8 or before you may have
     /// to use this API instead.
     #[cfg(target_os = "macos")]
+    #[deprecated(note = "use `set_protocol_version_max`")]
     pub fn set_protocol_version_enabled(
         &mut self,
         protocol: SslProtocol,
@@ -961,7 +971,7 @@ pub struct SslStream<S> {
 }
 
 impl<S: fmt::Debug> fmt::Debug for SslStream<S> {
-    fn fmt(&self, fmt: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> fmt::Result {
         fmt.debug_struct("SslStream")
             .field("context", &self.ctx)
             .field("stream", self.get_ref())
@@ -1152,6 +1162,7 @@ pub struct ClientBuilder {
     whitelisted_ciphers: Vec<CipherSuite>,
     blacklisted_ciphers: Vec<CipherSuite>,
     alpn: Option<Vec<String>>,
+    enable_session_tickets: bool,
 }
 
 impl Default for ClientBuilder {
@@ -1176,6 +1187,7 @@ impl ClientBuilder {
             whitelisted_ciphers: Vec::new(),
             blacklisted_ciphers: Vec::new(),
             alpn: None,
+            enable_session_tickets: false,
         }
     }
 
@@ -1265,6 +1277,15 @@ impl ClientBuilder {
         self
     }
 
+    /// Configures the use of the RFC 5077 `SessionTicket` extension.
+    ///
+    /// Defaults to `false`.
+    #[cfg(feature = "session-tickets")]
+    pub fn enable_session_tickets(&mut self, enable: bool) -> &mut Self {
+        self.enable_session_tickets = enable;
+        self
+    }
+
     /// Initiates a new SSL/TLS session over a stream connected to the specified domain.
     ///
     /// If both SNI and hostname verification are disabled, the value of `domain` will be ignored.
@@ -1314,6 +1335,15 @@ impl ClientBuilder {
         {
             if let Some(ref alpn) = self.alpn {
                 ctx.set_alpn_protocols(&alpn.iter().map(|s| &**s).collect::<Vec<_>>())?;
+            }
+        }
+        #[cfg(feature = "session-tickets")]
+        {
+            if self.enable_session_tickets {
+                // We must use the domain here to ensure that we go through certificate validation
+                // again rather than resuming the session if the domain changes.
+                ctx.set_peer_id(domain.as_bytes())?;
+                ctx.set_session_tickets_enabled(true)?;
             }
         }
         ctx.set_break_on_server_auth(true)?;
@@ -1375,7 +1405,7 @@ impl ServerBuilder {
         ctx.set_certificate(&self.identity, &self.certs)?;
         match ctx.handshake(stream) {
             Ok(stream) => Ok(stream),
-            Err(HandshakeError::Interrupted(stream)) => Err(Error::from_code(stream.reason())),
+            Err(HandshakeError::Interrupted(stream)) => Err(stream.error().clone()),
             Err(HandshakeError::Failure(err)) => Err(err),
         }
     }
@@ -1428,6 +1458,65 @@ mod test {
         let mut buf = vec![];
         p!(stream.read_to_end(&mut buf));
         println!("{}", String::from_utf8_lossy(&buf));
+    }
+
+    #[test]
+    fn client_no_session_ticket_resumption() {
+        for _ in 0..2 {
+            let stream = p!(TcpStream::connect("google.com:443"));
+
+            // Manually handshake here.
+            let stream = MidHandshakeSslStream {
+                stream: ClientBuilder::new()
+                    .ctx_into_stream("google.com", stream)
+                    .unwrap(),
+                error: Error::from(errSecSuccess),
+            };
+
+            let mut result = stream.handshake();
+
+            if let Err(HandshakeError::Interrupted(stream)) = result {
+                assert!(stream.server_auth_completed());
+                result = stream.handshake();
+            } else {
+                panic!("Unexpectedly skipped server auth");
+            }
+
+            assert!(result.is_ok());
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "session-tickets")]
+    fn client_session_ticket_resumption() {
+        // The first time through this loop, we should do a full handshake. The second time, we
+        // should immediately finish the handshake without breaking on server auth.
+        for i in 0..2 {
+            let stream = p!(TcpStream::connect("google.com:443"));
+            let mut builder = ClientBuilder::new();
+            builder.enable_session_tickets(true);
+
+            // Manually handshake here.
+            let stream = MidHandshakeSslStream {
+                stream: builder.ctx_into_stream("google.com", stream).unwrap(),
+                error: Error::from(errSecSuccess),
+            };
+
+            let mut result = stream.handshake();
+
+            if let Err(HandshakeError::Interrupted(stream)) = result {
+                assert!(stream.server_auth_completed());
+                assert_eq!(
+                    i, 0,
+                    "Session ticket resumption did not work, server auth was not skipped"
+                );
+                result = stream.handshake();
+            } else {
+                assert_eq!(i, 1, "Unexpectedly skipped server auth");
+            }
+
+            assert!(result.is_ok());
+        }
     }
 
     #[test]

@@ -10,11 +10,12 @@ use self::security_framework::import_export::{ImportedIdentity, Pkcs12ImportOpti
 use self::security_framework::secure_transport::{
     self, ClientBuilder, SslConnectionType, SslContext, SslProtocol, SslProtocolSide,
 };
-use self::security_framework_sys::base::errSecIO;
+use self::security_framework_sys::base::{errSecIO, errSecParam};
 use self::tempfile::TempDir;
 use std::error;
 use std::fmt;
 use std::io;
+use std::str;
 use std::sync::Mutex;
 use std::sync::Once;
 
@@ -23,11 +24,11 @@ use self::security_framework::os::macos::certificate::{PropertyType, SecCertific
 #[cfg(not(target_os = "ios"))]
 use self::security_framework::os::macos::certificate_oids::CertificateOid;
 #[cfg(not(target_os = "ios"))]
-use self::security_framework::os::macos::import_export::{ImportOptions, SecItems};
+use self::security_framework::os::macos::import_export::{
+    ImportOptions, Pkcs12ImportOptionsExt, SecItems,
+};
 #[cfg(not(target_os = "ios"))]
 use self::security_framework::os::macos::keychain::{self, KeychainSettings, SecKeychain};
-#[cfg(not(target_os = "ios"))]
-use self::security_framework_sys::base::errSecParam;
 
 use {Protocol, TlsAcceptorBuilder, TlsConnectorBuilder};
 
@@ -74,7 +75,7 @@ impl From<base::Error> for Error {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Identity {
     identity: SecIdentity,
     chain: Vec<SecCertificate>,
@@ -128,10 +129,10 @@ impl Identity {
                 keychain
             }
         };
-        let imports = Pkcs12ImportOptions::new()
-            .passphrase(pass)
-            .keychain(keychain)
-            .import(buf)?;
+        let mut import_opts = Pkcs12ImportOptions::new();
+        // Method shadowed by deprecated method.
+        <Pkcs12ImportOptions as Pkcs12ImportOptionsExt>::keychain(&mut import_opts, keychain);
+        let imports = import_opts.passphrase(pass).import(buf)?;
         Ok(imports)
     }
 
@@ -253,7 +254,7 @@ where
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TlsConnector {
     identity: Option<Identity>,
     min_protocol: Option<Protocol>,
@@ -262,6 +263,9 @@ pub struct TlsConnector {
     use_sni: bool,
     danger_accept_invalid_hostnames: bool,
     danger_accept_invalid_certs: bool,
+    disable_built_in_roots: bool,
+    #[cfg(feature = "alpn")]
+    alpn: Vec<String>,
 }
 
 impl TlsConnector {
@@ -278,6 +282,9 @@ impl TlsConnector {
             use_sni: builder.use_sni,
             danger_accept_invalid_hostnames: builder.accept_invalid_hostnames,
             danger_accept_invalid_certs: builder.accept_invalid_certs,
+            disable_built_in_roots: builder.disable_built_in_roots,
+            #[cfg(feature = "alpn")]
+            alpn: builder.alpn.clone(),
         })
     }
 
@@ -299,6 +306,14 @@ impl TlsConnector {
         builder.use_sni(self.use_sni);
         builder.danger_accept_invalid_hostnames(self.danger_accept_invalid_hostnames);
         builder.danger_accept_invalid_certs(self.danger_accept_invalid_certs);
+        builder.trust_anchor_certificates_only(self.disable_built_in_roots);
+
+        #[cfg(feature = "alpn")]
+        {
+            if !self.alpn.is_empty() {
+                builder.alpn_protocols(&self.alpn.iter().map(String::as_str).collect::<Vec<_>>());
+            }
+        }
 
         match builder.handshake(domain, stream) {
             Ok(stream) => Ok(TlsStream { stream, cert: None }),
@@ -383,6 +398,27 @@ impl<S: io::Read + io::Write> TlsStream<S> {
         trust.evaluate()?;
 
         Ok(trust.certificate_at_index(0).map(Certificate))
+    }
+
+    #[cfg(feature = "alpn")]
+    pub fn negotiated_alpn(&self) -> Result<Option<Vec<u8>>, Error> {
+        match self.stream.context().alpn_protocols() {
+            Ok(protocols) => {
+                // Per RFC7301, "ProtocolNameList" MUST contain exactly one "ProtocolName".
+                assert!(protocols.len() < 2);
+
+                if protocols.is_empty() {
+                    // Not sure this is actually possible.
+                    Ok(None)
+                } else {
+                    Ok(Some(protocols.into_iter().next().unwrap().into_bytes()))
+                }
+            }
+            // The macOS API appears to return `errSecParam` whenever no ALPN was negotiated, both
+            // when it isn't attempted and when it isn't successful.
+            Err(e) if e.code() == errSecParam => Ok(None),
+            Err(other) => Err(Error::from(other)),
+        }
     }
 
     #[cfg(target_os = "ios")]

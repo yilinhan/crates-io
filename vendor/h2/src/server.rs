@@ -23,10 +23,10 @@
 //!
 //! The [`Connection`] instance is used to accept inbound HTTP/2.0 streams. It
 //! does this by implementing [`futures::Stream`]. When a new stream is
-//! received, a call to [`Connection::poll`] will return `(request, response)`.
+//! received, a call to [`Connection::accept`] will return `(request, response)`.
 //! The `request` handle (of type [`http::Request<RecvStream>`]) contains the
 //! HTTP request head as well as provides a way to receive the inbound data
-//! stream and the trailers. The `response` handle (of type [`SendStream`])
+//! stream and the trailers. The `response` handle (of type [`SendResponse`])
 //! allows responding to the request, stream the response payload, send
 //! trailers, and send push promises.
 //!
@@ -36,19 +36,19 @@
 //! # Managing the connection
 //!
 //! The [`Connection`] instance is used to manage connection state. The caller
-//! is required to call either [`Connection::poll`] or
+//! is required to call either [`Connection::accept`] or
 //! [`Connection::poll_close`] in order to advance the connection state. Simply
 //! operating on [`SendStream`] or [`RecvStream`] will have no effect unless the
 //! connection state is advanced.
 //!
-//! It is not required to call **both** [`Connection::poll`] and
+//! It is not required to call **both** [`Connection::accept`] and
 //! [`Connection::poll_close`]. If the caller is ready to accept a new stream,
-//! then only [`Connection::poll`] should be called. When the caller **does
+//! then only [`Connection::accept`] should be called. When the caller **does
 //! not** want to accept a new stream, [`Connection::poll_close`] should be
 //! called.
 //!
 //! The [`Connection`] instance should only be dropped once
-//! [`Connection::poll_close`] returns `Ready`. Once [`Connection::poll`]
+//! [`Connection::poll_close`] returns `Ready`. Once [`Connection::accept`]
 //! returns `Ready(None)`, there will no longer be any more inbound streams. At
 //! this point, only [`Connection::poll_close`] should be called.
 //!
@@ -121,13 +121,14 @@ use crate::proto::{self, Config, Prioritized};
 use crate::{FlowControl, PingPong, RecvStream, SendStream};
 
 use bytes::{Buf, Bytes};
-use http::{HeaderMap, Request, Response};
+use http::{HeaderMap, Method, Request, Response};
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use std::time::Duration;
 use std::{convert, fmt, io, mem};
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
+use tracing_futures::{Instrument, Instrumented};
 
 /// In progress HTTP/2.0 connection handshake future.
 ///
@@ -149,6 +150,8 @@ pub struct Handshake<T, B: Buf = Bytes> {
     builder: Builder,
     /// The current state of the handshake.
     state: Handshaking<T, B>,
+    /// Span tracking the handshake
+    span: tracing::Span,
 }
 
 /// Accepts inbound HTTP/2.0 streams on a connection.
@@ -290,9 +293,9 @@ impl<B: Buf + fmt::Debug> fmt::Debug for SendPushedResponse<B> {
 /// Stages of an in-progress handshake.
 enum Handshaking<T, B: Buf> {
     /// State 1. Connection is flushing pending SETTINGS frame.
-    Flushing(Flush<T, Prioritized<B>>),
+    Flushing(Instrumented<Flush<T, Prioritized<B>>>),
     /// State 2. Connection is waiting for the client preface.
-    ReadingPreface(ReadPreface<T, Prioritized<B>>),
+    ReadingPreface(Instrumented<ReadPreface<T, Prioritized<B>>>),
     /// Dummy state for `mem::replace`.
     Empty,
 }
@@ -359,6 +362,9 @@ where
     B: Buf + 'static,
 {
     fn handshake2(io: T, builder: Builder) -> Handshake<T, B> {
+        let span = tracing::trace_span!("server_handshake", io = %std::any::type_name::<T>());
+        let entered = span.enter();
+
         // Create the codec.
         let mut codec = Codec::new(io);
 
@@ -378,7 +384,13 @@ where
         // Create the handshake future.
         let state = Handshaking::from(codec);
 
-        Handshake { builder, state }
+        drop(entered);
+
+        Handshake {
+            builder,
+            state,
+            span,
+        }
     }
 
     /// Accept the next incoming request on this connection.
@@ -402,7 +414,7 @@ where
         }
 
         if let Some(inner) = self.connection.next_incoming() {
-            log::trace!("received incoming");
+            tracing::trace!("received incoming");
             let (head, _) = inner.take_request().into_parts();
             let body = RecvStream::new(FlowControl::new(inner.clone_to_opaque()));
 
@@ -1146,8 +1158,10 @@ where
         let mut rem = PREFACE.len() - self.pos;
 
         while rem > 0 {
-            let n = ready!(Pin::new(self.inner_mut()).poll_read(cx, &mut buf[..rem]))
+            let mut buf = ReadBuf::new(&mut buf[..rem]);
+            ready!(Pin::new(self.inner_mut()).poll_read(cx, &mut buf))
                 .map_err(crate::Error::from_io)?;
+            let n = buf.filled().len();
             if n == 0 {
                 return Poll::Ready(Err(crate::Error::from_io(io::Error::new(
                     io::ErrorKind::UnexpectedEof,
@@ -1155,7 +1169,7 @@ where
                 ))));
             }
 
-            if PREFACE[self.pos..self.pos + n] != buf[..n] {
+            if &PREFACE[self.pos..self.pos + n] != buf.filled() {
                 proto_err!(conn: "read_preface: invalid preface");
                 // TODO: Should this just write the GO_AWAY frame directly?
                 return Poll::Ready(Err(Reason::PROTOCOL_ERROR.into()));
@@ -1179,7 +1193,9 @@ where
     type Output = Result<Connection<T, B>, crate::Error>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        log::trace!("Handshake::poll(); state={:?};", self.state);
+        let span = self.span.clone(); // XXX(eliza): T_T
+        let _e = span.enter();
+        tracing::trace!(state = ?self.state);
         use crate::server::Handshaking::*;
 
         self.state = if let Flushing(ref mut flush) = self.state {
@@ -1188,11 +1204,11 @@ where
             // for the client preface.
             let codec = match Pin::new(flush).poll(cx)? {
                 Poll::Pending => {
-                    log::trace!("Handshake::poll(); flush.poll()=Pending");
+                    tracing::trace!(flush.poll = %"Pending");
                     return Poll::Pending;
                 }
                 Poll::Ready(flushed) => {
-                    log::trace!("Handshake::poll(); flush.poll()=Ready");
+                    tracing::trace!(flush.poll = %"Ready");
                     flushed
                 }
             };
@@ -1229,7 +1245,7 @@ where
                 },
             );
 
-            log::trace!("Handshake::poll(); connection established!");
+            tracing::trace!("connection established!");
             let mut c = Connection { connection };
             if let Some(sz) = self.builder.initial_target_connection_window_size {
                 c.set_target_window_size(sz);
@@ -1289,15 +1305,15 @@ impl Peer {
         if let Err(e) = frame::PushPromise::validate_request(&request) {
             use PushPromiseHeaderError::*;
             match e {
-                NotSafeAndCacheable => log::debug!(
-                    "convert_push_message: method {} is not safe and cacheable; promised_id={:?}",
+                NotSafeAndCacheable => tracing::debug!(
+                    ?promised_id,
+                    "convert_push_message: method {} is not safe and cacheable",
                     request.method(),
-                    promised_id,
                 ),
-                InvalidContentLength(e) => log::debug!(
-                    "convert_push_message; promised request has invalid content-length {:?}; promised_id={:?}",
+                InvalidContentLength(e) => tracing::debug!(
+                    ?promised_id,
+                    "convert_push_message; promised request has invalid content-length {:?}",
                     e,
-                    promised_id,
                 ),
             }
             return Err(UserError::MalformedHeaders);
@@ -1328,6 +1344,8 @@ impl Peer {
 impl proto::Peer for Peer {
     type Poll = Request<()>;
 
+    const NAME: &'static str = "Server";
+
     fn is_server() -> bool {
         true
     }
@@ -1347,7 +1365,7 @@ impl proto::Peer for Peer {
 
         macro_rules! malformed {
             ($($arg:tt)*) => {{
-                log::debug!($($arg)*);
+                tracing::debug!($($arg)*);
                 return Err(RecvError::Stream {
                     id: stream_id,
                     reason: Reason::PROTOCOL_ERROR,
@@ -1357,7 +1375,9 @@ impl proto::Peer for Peer {
 
         b = b.version(Version::HTTP_2);
 
+        let is_connect;
         if let Some(method) = pseudo.method {
+            is_connect = method == Method::CONNECT;
             b = b.method(method);
         } else {
             malformed!("malformed headers: missing method");
@@ -1365,7 +1385,7 @@ impl proto::Peer for Peer {
 
         // Specifying :status for a request is a protocol error
         if pseudo.status.is_some() {
-            log::trace!("malformed headers: :status field on request; PROTOCOL_ERROR");
+            tracing::trace!("malformed headers: :status field on request; PROTOCOL_ERROR");
             return Err(RecvError::Connection(Reason::PROTOCOL_ERROR));
         }
 
@@ -1385,8 +1405,11 @@ impl proto::Peer for Peer {
             })?);
         }
 
-        // A :scheme is always required.
+        // A :scheme is required, except CONNECT.
         if let Some(scheme) = pseudo.scheme {
+            if is_connect {
+                malformed!(":scheme in CONNECT");
+            }
             let maybe_scheme = scheme.parse();
             let scheme = maybe_scheme.or_else(|why| {
                 malformed!(
@@ -1402,11 +1425,15 @@ impl proto::Peer for Peer {
             if parts.authority.is_some() {
                 parts.scheme = Some(scheme);
             }
-        } else {
+        } else if !is_connect {
             malformed!("malformed headers: missing scheme");
         }
 
         if let Some(path) = pseudo.path {
+            if is_connect {
+                malformed!(":path in CONNECT");
+            }
+
             // This cannot be empty
             if path.is_empty() {
                 malformed!("malformed headers: missing path");
@@ -1462,7 +1489,7 @@ where
 {
     #[inline]
     fn from(flush: Flush<T, Prioritized<B>>) -> Self {
-        Handshaking::Flushing(flush)
+        Handshaking::Flushing(flush.instrument(tracing::trace_span!("flush")))
     }
 }
 
@@ -1473,7 +1500,7 @@ where
 {
     #[inline]
     fn from(read: ReadPreface<T, Prioritized<B>>) -> Self {
-        Handshaking::ReadingPreface(read)
+        Handshaking::ReadingPreface(read.instrument(tracing::trace_span!("read_preface")))
     }
 }
 

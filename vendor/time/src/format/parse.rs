@@ -1,21 +1,25 @@
 //! Parsing for various types.
 
-use super::{parse_fmt_string, FormatItem, Padding, Specifier};
-use crate::internal_prelude::*;
+use crate::{
+    error,
+    format::{parse_fmt_string, well_known, FormatItem, Padding, Specifier},
+    Format, UtcOffset, Weekday,
+};
+#[cfg(not(feature = "std"))]
+use alloc::boxed::Box;
 use core::{
     fmt::{self, Display, Formatter},
     num::{NonZeroU16, NonZeroU8},
-    ops::{Bound, RangeBounds},
     str::FromStr,
 };
 
 /// Helper type to avoid repeating the error type.
-pub(crate) type ParseResult<T> = Result<T, ParseError>;
+pub(crate) type ParseResult<T> = Result<T, Error>;
 
 /// An error occurred while parsing.
-#[cfg_attr(supports_non_exhaustive, non_exhaustive)]
+#[cfg_attr(__time_02_supports_non_exhaustive, non_exhaustive)]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum ParseError {
+pub enum Error {
     /// The nanosecond present was not valid.
     InvalidNanosecond,
     /// The second present was not valid.
@@ -56,23 +60,21 @@ pub enum ParseError {
     /// There was not enough information provided to create the requested type.
     InsufficientInformation,
     /// A component was out of range.
-    ComponentOutOfRange(Box<ComponentRangeError>),
-    #[cfg(not(supports_non_exhaustive))]
+    ComponentOutOfRange(Box<error::ComponentRange>),
+    #[cfg(not(__time_02_supports_non_exhaustive))]
     #[doc(hidden)]
     __NonExhaustive,
 }
 
-impl From<ComponentRangeError> for ParseError {
-    #[inline(always)]
-    fn from(error: ComponentRangeError) -> Self {
-        ParseError::ComponentOutOfRange(Box::new(error))
+impl From<error::ComponentRange> for Error {
+    fn from(error: error::ComponentRange) -> Self {
+        Error::ComponentOutOfRange(Box::new(error))
     }
 }
 
-impl Display for ParseError {
-    #[inline(always)]
+impl Display for Error {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        use ParseError::*;
+        use Error::*;
         match self {
             InvalidNanosecond => f.write_str("invalid nanosecond"),
             InvalidSecond => f.write_str("invalid second"),
@@ -96,17 +98,17 @@ impl Display for ParseError {
                 f.write_str("insufficient information provided to create the requested type")
             }
             ComponentOutOfRange(e) => write!(f, "{}", e),
-            #[cfg(not(supports_non_exhaustive))]
+            #[cfg(not(__time_02_supports_non_exhaustive))]
             __NonExhaustive => unreachable!(),
         }
     }
 }
 
-#[cfg(std)]
-impl std::error::Error for ParseError {
+#[cfg(feature = "std")]
+impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
-            ParseError::ComponentOutOfRange(e) => Some(e.as_ref()),
+            Error::ComponentOutOfRange(e) => Some(e.as_ref()),
             _ => None,
         }
     }
@@ -160,7 +162,6 @@ pub(crate) struct ParsedItems {
 
 impl ParsedItems {
     /// Create a new `ParsedItems` with nothing known.
-    #[inline(always)]
     pub(crate) const fn new() -> Self {
         Self {
             week_based_year: None,
@@ -184,20 +185,30 @@ impl ParsedItems {
 }
 
 /// Attempt to consume the provided character.
-#[inline]
 pub(crate) fn try_consume_char(s: &mut &str, expected: char) -> ParseResult<()> {
     match s.char_indices().next() {
         Some((index, actual_char)) if actual_char == expected => {
             *s = &s[(index + actual_char.len_utf8())..];
             Ok(())
         }
-        Some((_, actual)) => Err(ParseError::UnexpectedCharacter { expected, actual }),
-        None => Err(ParseError::UnexpectedEndOfString),
+        Some((_, actual)) => Err(Error::UnexpectedCharacter { expected, actual }),
+        None => Err(Error::UnexpectedEndOfString),
+    }
+}
+
+/// Attempt to consume the provided character, ignoring case.
+pub(crate) fn try_consume_char_case_insensitive(s: &mut &str, expected: char) -> ParseResult<()> {
+    match s.char_indices().next() {
+        Some((index, actual_char)) if actual_char.eq_ignore_ascii_case(&expected) => {
+            *s = &s[(index + actual_char.len_utf8())..];
+            Ok(())
+        }
+        Some((_, actual)) => Err(Error::UnexpectedCharacter { expected, actual }),
+        None => Err(Error::UnexpectedEndOfString),
     }
 }
 
 /// Attempt to consume the provided string.
-#[inline]
 pub(crate) fn try_consume_str(s: &mut &str, expected: &str) -> ParseResult<()> {
     if s.starts_with(expected) {
         *s = &s[expected.len()..];
@@ -214,7 +225,6 @@ pub(crate) fn try_consume_str(s: &mut &str, expected: &str) -> ParseResult<()> {
 }
 
 /// Attempt to find one of the strings provided, returning the first value.
-#[inline]
 pub(crate) fn try_consume_first_match<T: Copy>(
     s: &mut &str,
     opts: impl IntoIterator<Item = (impl AsRef<str>, T)>,
@@ -231,33 +241,21 @@ pub(crate) fn try_consume_first_match<T: Copy>(
 
 /// Attempt to consume a number of digits. Consumes the maximum amount possible
 /// within the range provided.
-#[inline]
-pub(crate) fn try_consume_digits<T: FromStr, U: RangeBounds<usize>>(
+pub(crate) fn try_consume_digits<T: FromStr>(
     s: &mut &str,
-    num_digits: U,
+    min_digits: usize,
+    max_digits: usize,
 ) -> Option<T> {
-    // We know that the value is a `usize`, so we can do `+/- 1` as necessary.
-    let num_digits_start = match num_digits.start_bound() {
-        Bound::Unbounded => usize::min_value(),
-        Bound::Included(&v) => v,
-        Bound::Excluded(&v) => v + 1,
-    };
-    let num_digits_end = match num_digits.end_bound() {
-        Bound::Unbounded => usize::max_value(),
-        Bound::Included(&v) => v,
-        Bound::Excluded(&v) => v - 1,
-    };
-
     // Determine how many digits the string starts with, up to the upper limit
     // of the range.
     let len = s
         .chars()
-        .take(num_digits_end)
+        .take(max_digits)
         .take_while(char::is_ascii_digit)
         .count();
 
     // We don't have enough digits.
-    if len < num_digits_start {
+    if len < min_digits {
         return None;
     }
 
@@ -269,20 +267,7 @@ pub(crate) fn try_consume_digits<T: FromStr, U: RangeBounds<usize>>(
     digits.parse::<T>().ok()
 }
 
-/// Attempt to consume a number of digits. Consumes the maximum amount possible
-/// within the range provided. Returns `None` if the value is not within the
-/// allowed range.
-#[inline(always)]
-pub(crate) fn try_consume_digits_in_range<T: FromStr + PartialOrd>(
-    s: &mut &str,
-    num_digits: impl RangeBounds<usize>,
-    range: impl RangeBounds<T>,
-) -> Option<T> {
-    try_consume_digits(s, num_digits).filter(|value| range.contains(value))
-}
-
 /// Attempt to consume an exact number of digits.
-#[inline]
 pub(crate) fn try_consume_exact_digits<T: FromStr>(
     s: &mut &str,
     num_digits: usize,
@@ -294,7 +279,7 @@ pub(crate) fn try_consume_exact_digits<T: FromStr>(
     };
 
     if padding == Padding::None {
-        try_consume_digits(s, 1..=(num_digits - pad_size))
+        try_consume_digits(s, 1, num_digits - pad_size)
     } else {
         // Ensure all the necessary characters are ASCII digits.
         if !s
@@ -319,32 +304,14 @@ pub(crate) fn try_consume_exact_digits<T: FromStr>(
     }
 }
 
-/// Attempt to consume an exact number of digits. Returns `None` if the value is
-/// not within the allowed range.
-#[inline]
-pub(crate) fn try_consume_exact_digits_in_range<T: FromStr + PartialOrd, U: RangeBounds<T>>(
-    s: &mut &str,
-    num_digits: usize,
-    range: U,
-    padding: Padding,
-) -> Option<T> {
-    try_consume_exact_digits(s, num_digits, padding).filter(|value| range.contains(value))
-}
-
 /// Consume all leading padding up to the number of characters.
 ///
 /// Returns the number of characters trimmed.
-#[inline]
 pub(crate) fn consume_padding(s: &mut &str, padding: Padding, max_chars: usize) -> usize {
     let pad_char = match padding {
         Padding::Space => ' ',
         Padding::Zero => '0',
         Padding::None => return 0,
-        Padding::Default => unreachable!(
-            "Default padding depends on context. This value should replaced prior to calling \
-             `consume_padding`. If this is encountered, please file an issue on the time \
-             repository."
-        ),
     };
 
     let pad_width = s
@@ -358,8 +325,8 @@ pub(crate) fn consume_padding(s: &mut &str, padding: Padding, max_chars: usize) 
 
 /// Attempt to parse the string with the provided format, returning a struct
 /// containing all information found.
-#[inline]
-pub(crate) fn parse(s: &str, format: &str) -> ParseResult<ParsedItems> {
+#[allow(clippy::too_many_lines)]
+pub(crate) fn parse(s: &str, format: &Format) -> ParseResult<ParsedItems> {
     use super::{date, offset, time};
 
     // Make a copy of the provided string, letting us mutate as necessary.
@@ -380,90 +347,97 @@ pub(crate) fn parse(s: &str, format: &str) -> ParseResult<ParsedItems> {
         };
     }
 
-    for item in parse_fmt_string(format) {
-        match item {
-            FormatItem::Literal(expected) => try_consume_str(&mut s, expected)?,
-            FormatItem::Specifier(specifier) => {
-                use Specifier::*;
-                match specifier {
-                    a => parse!(date::parse_a),
-                    A => parse!(date::parse_A),
-                    b => parse!(date::parse_b),
-                    B => parse!(date::parse_B),
-                    c => {
-                        parse!(date::parse_a);
-                        parse_char!(' ');
-                        parse!(date::parse_b);
-                        parse_char!(' ');
-                        parse!(date::parse_d(Padding::None));
-                        parse_char!(' ');
-                        parse!(time::parse_H(Padding::None));
-                        parse_char!(':');
-                        parse!(time::parse_M(Padding::Default));
-                        parse_char!(':');
-                        parse!(time::parse_S(Padding::Default));
-                        parse_char!(' ');
-                        parse!(date::parse_Y(Padding::None));
+    match &format {
+        Format::Rfc3339 => well_known::rfc3339::parse(&mut items, &mut s)?,
+        Format::Custom(format) => {
+            for item in parse_fmt_string(format) {
+                match item {
+                    FormatItem::Literal(expected) => try_consume_str(&mut s, expected)?,
+                    FormatItem::Specifier(specifier) => {
+                        use Specifier::*;
+                        match specifier {
+                            a => parse!(date::parse_a),
+                            A => parse!(date::parse_A),
+                            b => parse!(date::parse_b),
+                            B => parse!(date::parse_B),
+                            c => {
+                                parse!(date::parse_a);
+                                parse_char!(' ');
+                                parse!(date::parse_b);
+                                parse_char!(' ');
+                                parse!(date::parse_d(Padding::None));
+                                parse_char!(' ');
+                                parse!(time::parse_H(Padding::None));
+                                parse_char!(':');
+                                parse!(time::parse_M(Padding::Zero));
+                                parse_char!(':');
+                                parse!(time::parse_S(Padding::Zero));
+                                parse_char!(' ');
+                                parse!(date::parse_Y(Padding::None));
+                            }
+                            C { padding } => parse!(date::parse_C(padding)),
+                            d { padding } => parse!(date::parse_d(padding)),
+                            D => {
+                                parse!(date::parse_m(Padding::None));
+                                parse_char!('/');
+                                parse!(date::parse_d(Padding::Zero));
+                                parse_char!('/');
+                                parse!(date::parse_y(Padding::Zero));
+                            }
+                            F => {
+                                parse!(date::parse_Y(Padding::None));
+                                parse_char!('-');
+                                parse!(date::parse_m(Padding::Zero));
+                                parse_char!('-');
+                                parse!(date::parse_d(Padding::Zero));
+                            }
+                            g { padding } => parse!(date::parse_g(padding)),
+                            G { padding } => parse!(date::parse_G(padding)),
+                            H { padding } => parse!(time::parse_H(padding)),
+                            I { padding } => parse!(time::parse_I(padding)),
+                            j { padding } => parse!(date::parse_j(padding)),
+                            M { padding } => parse!(time::parse_M(padding)),
+                            m { padding } => parse!(date::parse_m(padding)),
+                            N => parse!(time::parse_N),
+                            p => parse!(time::parse_p),
+                            P => parse!(time::parse_P),
+                            r => {
+                                parse!(time::parse_I(Padding::None));
+                                parse_char!(':');
+                                parse!(time::parse_M(Padding::Zero));
+                                parse_char!(':');
+                                parse!(time::parse_S(Padding::Zero));
+                                parse_char!(' ');
+                                parse!(time::parse_p);
+                            }
+                            R => {
+                                parse!(time::parse_H(Padding::None));
+                                parse_char!(':');
+                                parse!(time::parse_M(Padding::Zero));
+                            }
+                            S { padding } => parse!(time::parse_S(padding)),
+                            T => {
+                                parse!(time::parse_H(Padding::None));
+                                parse_char!(':');
+                                parse!(time::parse_M(Padding::Zero));
+                                parse_char!(':');
+                                parse!(time::parse_S(Padding::Zero));
+                            }
+                            u => parse!(date::parse_u),
+                            U { padding } => parse!(date::parse_U(padding)),
+                            V { padding } => parse!(date::parse_V(padding)),
+                            w => parse!(date::parse_w),
+                            W { padding } => parse!(date::parse_W(padding)),
+                            y { padding } => parse!(date::parse_y(padding)),
+                            z => parse!(offset::parse_z),
+                            Y { padding } => parse!(date::parse_Y(padding)),
+                        }
                     }
-                    C { padding } => parse!(date::parse_C(padding)),
-                    d { padding } => parse!(date::parse_d(padding)),
-                    D => {
-                        parse!(date::parse_m(Padding::Default));
-                        parse_char!('/');
-                        parse!(date::parse_d(Padding::Default));
-                        parse_char!('/');
-                        parse!(date::parse_y(Padding::Default));
-                    }
-                    F => {
-                        parse!(date::parse_Y(Padding::None));
-                        parse_char!('-');
-                        parse!(date::parse_m(Padding::Default));
-                        parse_char!('-');
-                        parse!(date::parse_d(Padding::Default));
-                    }
-                    g { padding } => parse!(date::parse_g(padding)),
-                    G { padding } => parse!(date::parse_G(padding)),
-                    H { padding } => parse!(time::parse_H(padding)),
-                    I { padding } => parse!(time::parse_I(padding)),
-                    j { padding } => parse!(date::parse_j(padding)),
-                    M { padding } => parse!(time::parse_M(padding)),
-                    m { padding } => parse!(date::parse_m(padding)),
-                    N => parse!(time::parse_N),
-                    p => parse!(time::parse_p),
-                    P => parse!(time::parse_P),
-                    r => {
-                        parse!(time::parse_I(Padding::None));
-                        parse_char!(':');
-                        parse!(time::parse_M(Padding::Default));
-                        parse_char!(':');
-                        parse!(time::parse_S(Padding::Default));
-                        parse_char!(' ');
-                        parse!(time::parse_p);
-                    }
-                    R => {
-                        parse!(time::parse_H(Padding::None));
-                        parse_char!(':');
-                        parse!(time::parse_M(Padding::Default));
-                    }
-                    S { padding } => parse!(time::parse_S(padding)),
-                    T => {
-                        parse!(time::parse_H(Padding::None));
-                        parse_char!(':');
-                        parse!(time::parse_M(Padding::Default));
-                        parse_char!(':');
-                        parse!(time::parse_S(Padding::Default));
-                    }
-                    u => parse!(date::parse_u),
-                    U { padding } => parse!(date::parse_U(padding)),
-                    V { padding } => parse!(date::parse_V(padding)),
-                    w => parse!(date::parse_w),
-                    W { padding } => parse!(date::parse_W(padding)),
-                    y { padding } => parse!(date::parse_y(padding)),
-                    z => parse!(offset::parse_z),
-                    Y { padding } => parse!(date::parse_Y(padding)),
                 }
             }
         }
+        #[cfg(not(__time_02_supports_non_exhaustive))]
+        Format::__NonExhaustive => unreachable!(),
     }
 
     Ok(items)

@@ -86,7 +86,8 @@ impl Identity {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "No identity found in PKCS #12 archive",
-                ).into());
+                )
+                .into());
             }
         };
 
@@ -112,7 +113,8 @@ impl Certificate {
             Err(_) => Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 "PEM representation contains non-UTF-8 bytes",
-            ).into()),
+            )
+            .into()),
         }
     }
 
@@ -176,7 +178,7 @@ impl<S> From<io::Error> for HandshakeError<S> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct TlsConnector {
     cert: Option<CertContext>,
     roots: CertStore,
@@ -185,6 +187,9 @@ pub struct TlsConnector {
     use_sni: bool,
     accept_invalid_hostnames: bool,
     accept_invalid_certs: bool,
+    disable_built_in_roots: bool,
+    #[cfg(feature = "alpn")]
+    alpn: Vec<String>,
 }
 
 impl TlsConnector {
@@ -203,6 +208,9 @@ impl TlsConnector {
             use_sni: builder.use_sni,
             accept_invalid_hostnames: builder.accept_invalid_hostnames,
             accept_invalid_certs: builder.accept_invalid_certs,
+            disable_built_in_roots: builder.disable_built_in_roots,
+            #[cfg(feature = "alpn")]
+            alpn: builder.alpn.clone(),
         })
     }
 
@@ -224,6 +232,36 @@ impl TlsConnector {
             .accept_invalid_hostnames(self.accept_invalid_hostnames);
         if self.accept_invalid_certs {
             builder.verify_callback(|_| Ok(()));
+        } else if self.disable_built_in_roots {
+            let roots_copy = self.roots.clone();
+            builder.verify_callback(move |res| {
+                if let Err(err) = res.result() {
+                    // Propagate previous error encountered during normal cert validation.
+                    return Err(err);
+                }
+
+                if let Some(chain) = res.chain() {
+                    if chain
+                        .certificates()
+                        .any(|cert| roots_copy.certs().any(|root_cert| root_cert == cert))
+                    {
+                        return Ok(());
+                    }
+                }
+
+                Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "unable to find any user-specified roots in the final cert chain",
+                ))
+            });
+        }
+        #[cfg(feature = "alpn")]
+        {
+            if !self.alpn.is_empty() {
+                builder.request_application_protocols(
+                    &self.alpn.iter().map(|s| s.as_bytes()).collect::<Vec<_>>(),
+                );
+            }
         }
         match builder.connect(cred, stream) {
             Ok(s) => Ok(TlsStream(s)),
@@ -293,6 +331,11 @@ impl<S: io::Read + io::Write> TlsStream<S> {
             Err(ref e) if e.raw_os_error() == Some(SEC_E_NO_CREDENTIALS as i32) => Ok(None),
             Err(e) => Err(Error(e)),
         }
+    }
+
+    #[cfg(feature = "alpn")]
+    pub fn negotiated_alpn(&self) -> Result<Option<Vec<u8>>, Error> {
+        Ok(self.0.negotiated_application_protocol()?)
     }
 
     pub fn tls_server_end_point(&self) -> Result<Option<Vec<u8>>, Error> {

@@ -2,8 +2,7 @@
 
 use crate::{
     date::{MAX_YEAR, MIN_YEAR},
-    days_in_year,
-    internal_prelude::*,
+    internals, Date, Duration, OffsetDateTime, PrimitiveDateTime, Time, UtcOffset, Weekday,
 };
 use rand::{
     distributions::{Distribution, Standard},
@@ -11,7 +10,6 @@ use rand::{
 };
 
 impl Distribution<Time> for Standard {
-    #[inline]
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Time {
         Time {
             hour: rng.gen_range(0, 24),
@@ -23,18 +21,17 @@ impl Distribution<Time> for Standard {
 }
 
 impl Distribution<Date> for Standard {
-    #[inline]
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Date {
-        let year = rng.gen_range(MIN_YEAR, MAX_YEAR + 1);
-        Date {
-            year,
-            ordinal: rng.gen_range(1, days_in_year(year) + 1),
-        }
+        /// The minimum date allowed to be represented.
+        const MIN_DATE: Date = internals::Date::from_ymd_unchecked(MIN_YEAR, 1, 1);
+        /// The maximum date allowed to be represented.
+        const MAX_DATE: Date = internals::Date::from_ymd_unchecked(MAX_YEAR, 12, 31);
+
+        Date::from_julian_day(rng.gen_range(MIN_DATE.julian_day(), MAX_DATE.julian_day() + 1))
     }
 }
 
 impl Distribution<UtcOffset> for Standard {
-    #[inline]
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> UtcOffset {
         UtcOffset {
             seconds: rng.gen_range(-86_399, 86_400),
@@ -43,39 +40,28 @@ impl Distribution<UtcOffset> for Standard {
 }
 
 impl Distribution<PrimitiveDateTime> for Standard {
-    #[inline]
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> PrimitiveDateTime {
-        PrimitiveDateTime {
-            date: Standard.sample(rng),
-            time: Standard.sample(rng),
-        }
+        PrimitiveDateTime::new(Standard.sample(rng), Standard.sample(rng))
     }
 }
 
 impl Distribution<OffsetDateTime> for Standard {
-    #[inline]
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> OffsetDateTime {
-        OffsetDateTime {
-            utc_datetime: Standard.sample(rng),
-            offset: Standard.sample(rng),
-        }
+        OffsetDateTime::new_assuming_offset(Standard.sample(rng), Standard.sample(rng))
     }
 }
 
 impl Distribution<Duration> for Standard {
-    #[inline]
-    #[allow(clippy::cast_possible_truncation)]
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Duration {
         let seconds = Standard.sample(rng);
-        Duration {
+        Duration::new(
             seconds,
-            nanoseconds: seconds.signum() as i32 * rng.gen_range(0, 1_000_000_000),
-        }
+            seconds.signum() as i32 * rng.gen_range(0, 1_000_000_000),
+        )
     }
 }
 
 impl Distribution<Weekday> for Standard {
-    #[inline]
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> Weekday {
         use Weekday::*;
 

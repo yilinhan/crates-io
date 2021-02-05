@@ -4,17 +4,25 @@ use std::error::Error as StdError;
 use std::fmt;
 
 use bytes::Bytes;
-use futures_channel::{mpsc, oneshot};
+use futures_channel::mpsc;
+#[cfg(any(feature = "http1", feature = "http2"))]
+#[cfg(feature = "client")]
+use futures_channel::oneshot;
 use futures_core::Stream; // for mpsc::Receiver
 #[cfg(feature = "stream")]
 use futures_util::TryStreamExt;
 use http::HeaderMap;
 use http_body::{Body as HttpBody, SizeHint};
 
-use crate::common::{task, watch, Future, Never, Pin, Poll};
-use crate::proto::h2::bdp;
-use crate::proto::DecodedLength;
-use crate::upgrade::OnUpgrade;
+use super::DecodedLength;
+#[cfg(feature = "stream")]
+use crate::common::sync_wrapper::SyncWrapper;
+use crate::common::{task, watch, Pin, Poll};
+#[cfg(any(feature = "http1", feature = "http2"))]
+#[cfg(feature = "client")]
+use crate::common::{Future, Never};
+#[cfg(all(feature = "http2", any(feature = "client", feature = "server")))]
+use crate::proto::h2::ping;
 
 type BodySender = mpsc::Sender<Result<Bytes, crate::Error>>;
 
@@ -37,18 +45,17 @@ enum Kind {
         want_tx: watch::Sender,
         rx: mpsc::Receiver<Result<Bytes, crate::Error>>,
     },
+    #[cfg(all(feature = "http2", any(feature = "client", feature = "server")))]
     H2 {
-        bdp: bdp::Sampler,
+        ping: ping::Recorder,
         content_length: DecodedLength,
         recv: h2::RecvStream,
     },
-    // NOTE: This requires `Sync` because of how easy it is to use `await`
-    // while a borrow of a `Request<Body>` exists.
-    //
-    // See https://github.com/rust-lang/rust/issues/57017
     #[cfg(feature = "stream")]
     Wrapped(
-        Pin<Box<dyn Stream<Item = Result<Bytes, Box<dyn StdError + Send + Sync>>> + Send + Sync>>,
+        SyncWrapper<
+            Pin<Box<dyn Stream<Item = Result<Bytes, Box<dyn StdError + Send + Sync>>> + Send>>,
+        >,
     ),
 }
 
@@ -62,24 +69,38 @@ struct Extra {
     /// a brand new connection, since the pool didn't know about the idle
     /// connection yet.
     delayed_eof: Option<DelayEof>,
-    on_upgrade: OnUpgrade,
 }
 
+#[cfg(any(feature = "http1", feature = "http2"))]
+#[cfg(feature = "client")]
 type DelayEofUntil = oneshot::Receiver<Never>;
 
 enum DelayEof {
     /// Initial state, stream hasn't seen EOF yet.
+    #[cfg(any(feature = "http1", feature = "http2"))]
+    #[cfg(feature = "client")]
     NotEof(DelayEofUntil),
     /// Transitions to this state once we've seen `poll` try to
     /// return EOF (`None`). This future is then polled, and
     /// when it completes, the Body finally returns EOF (`None`).
+    #[cfg(any(feature = "http1", feature = "http2"))]
+    #[cfg(feature = "client")]
     Eof(DelayEofUntil),
 }
 
-/// A sender half used with `Body::channel()`.
+/// A sender half created through [`Body::channel()`].
 ///
-/// Useful when wanting to stream chunks from another thread. See
-/// [`Body::channel`](Body::channel) for more.
+/// Useful when wanting to stream chunks from another thread.
+///
+/// ## Body Closing
+///
+/// Note that the request body will always be closed normally when the sender is dropped (meaning
+/// that the empty terminating chunk will be sent to the remote). If you desire to close the
+/// connection with an incomplete response (e.g. in the case of an error during asynchronous
+/// processing), call the [`Sender::abort()`] method to abort the body in an abnormal fashion.
+///
+/// [`Body::channel()`]: struct.Body.html#method.channel
+/// [`Sender::abort()`]: struct.Sender.html#method.abort
 #[must_use = "Sender does nothing unless sent on"]
 pub struct Sender {
     want_rx: watch::Receiver,
@@ -156,34 +177,26 @@ impl Body {
     #[cfg(feature = "stream")]
     pub fn wrap_stream<S, O, E>(stream: S) -> Body
     where
-        S: Stream<Item = Result<O, E>> + Send + Sync + 'static,
+        S: Stream<Item = Result<O, E>> + Send + 'static,
         O: Into<Bytes> + 'static,
         E: Into<Box<dyn StdError + Send + Sync>> + 'static,
     {
         let mapped = stream.map_ok(Into::into).map_err(Into::into);
-        Body::new(Kind::Wrapped(Box::pin(mapped)))
-    }
-
-    /// Converts this `Body` into a `Future` of a pending HTTP upgrade.
-    ///
-    /// See [the `upgrade` module](crate::upgrade) for more.
-    pub fn on_upgrade(self) -> OnUpgrade {
-        self.extra
-            .map(|ex| ex.on_upgrade)
-            .unwrap_or_else(OnUpgrade::none)
+        Body::new(Kind::Wrapped(SyncWrapper::new(Box::pin(mapped))))
     }
 
     fn new(kind: Kind) -> Body {
         Body { kind, extra: None }
     }
 
+    #[cfg(all(feature = "http2", any(feature = "client", feature = "server")))]
     pub(crate) fn h2(
         recv: h2::RecvStream,
         content_length: DecodedLength,
-        bdp: bdp::Sampler,
+        ping: ping::Recorder,
     ) -> Self {
         let body = Body::new(Kind::H2 {
-            bdp,
+            ping,
             content_length,
             recv,
         });
@@ -191,13 +204,8 @@ impl Body {
         body
     }
 
-    pub(crate) fn set_on_upgrade(&mut self, upgrade: OnUpgrade) {
-        debug_assert!(!upgrade.is_none(), "set_on_upgrade with empty upgrade");
-        let extra = self.extra_mut();
-        debug_assert!(extra.on_upgrade.is_none(), "set_on_upgrade twice");
-        extra.on_upgrade = upgrade;
-    }
-
+    #[cfg(any(feature = "http1", feature = "http2"))]
+    #[cfg(feature = "client")]
     pub(crate) fn delayed_eof(&mut self, fut: DelayEofUntil) {
         self.extra_mut().delayed_eof = Some(DelayEof::NotEof(fut));
     }
@@ -208,17 +216,16 @@ impl Body {
             .and_then(|extra| extra.delayed_eof.take())
     }
 
+    #[cfg(any(feature = "http1", feature = "http2"))]
     fn extra_mut(&mut self) -> &mut Extra {
-        self.extra.get_or_insert_with(|| {
-            Box::new(Extra {
-                delayed_eof: None,
-                on_upgrade: OnUpgrade::none(),
-            })
-        })
+        self.extra
+            .get_or_insert_with(|| Box::new(Extra { delayed_eof: None }))
     }
 
     fn poll_eof(&mut self, cx: &mut task::Context<'_>) -> Poll<Option<crate::Result<Bytes>>> {
         match self.take_delayed_eof() {
+            #[cfg(any(feature = "http1", feature = "http2"))]
+            #[cfg(feature = "client")]
             Some(DelayEof::NotEof(mut delay)) => match self.poll_inner(cx) {
                 ok @ Poll::Ready(Some(Ok(..))) | ok @ Poll::Pending => {
                     self.extra_mut().delayed_eof = Some(DelayEof::NotEof(delay));
@@ -234,6 +241,8 @@ impl Body {
                 },
                 Poll::Ready(Some(Err(e))) => Poll::Ready(Some(Err(e))),
             },
+            #[cfg(any(feature = "http1", feature = "http2"))]
+            #[cfg(feature = "client")]
             Some(DelayEof::Eof(mut delay)) => match Pin::new(&mut delay).poll(cx) {
                 Poll::Ready(Ok(never)) => match never {},
                 Poll::Pending => {
@@ -242,6 +251,11 @@ impl Body {
                 }
                 Poll::Ready(Err(_done)) => Poll::Ready(None),
             },
+            #[cfg(any(
+                not(any(feature = "http1", feature = "http2")),
+                not(feature = "client")
+            ))]
+            Some(delay_eof) => match delay_eof {},
             None => self.poll_inner(cx),
         }
     }
@@ -264,15 +278,16 @@ impl Body {
                     None => Poll::Ready(None),
                 }
             }
+            #[cfg(all(feature = "http2", any(feature = "client", feature = "server")))]
             Kind::H2 {
-                ref bdp,
+                ref ping,
                 recv: ref mut h2,
                 content_length: ref mut len,
             } => match ready!(h2.poll_data(cx)) {
                 Some(Ok(bytes)) => {
                     let _ = h2.flow_control().release_capacity(bytes.len());
                     len.sub_if(bytes.len() as u64);
-                    bdp.sample(bytes.len());
+                    ping.record_data(bytes.len());
                     Poll::Ready(Some(Ok(bytes)))
                 }
                 Some(Err(e)) => Poll::Ready(Some(Err(crate::Error::new_body(e)))),
@@ -280,13 +295,14 @@ impl Body {
             },
 
             #[cfg(feature = "stream")]
-            Kind::Wrapped(ref mut s) => match ready!(s.as_mut().poll_next(cx)) {
+            Kind::Wrapped(ref mut s) => match ready!(s.get_mut().as_mut().poll_next(cx)) {
                 Some(res) => Poll::Ready(Some(res.map_err(crate::Error::new_body))),
                 None => Poll::Ready(None),
             },
         }
     }
 
+    #[cfg(feature = "http1")]
     pub(super) fn take_full_data(&mut self) -> Option<Bytes> {
         if let Kind::Once(ref mut chunk) = self.kind {
             chunk.take()
@@ -297,7 +313,7 @@ impl Body {
 }
 
 impl Default for Body {
-    /// Returns [`Body::empty()`](Body::empty).
+    /// Returns `Body::empty()`.
     #[inline]
     fn default() -> Body {
         Body::empty()
@@ -316,14 +332,20 @@ impl HttpBody for Body {
     }
 
     fn poll_trailers(
-        mut self: Pin<&mut Self>,
-        cx: &mut task::Context<'_>,
+        #[cfg_attr(not(feature = "http2"), allow(unused_mut))] mut self: Pin<&mut Self>,
+        #[cfg_attr(not(feature = "http2"), allow(unused))] cx: &mut task::Context<'_>,
     ) -> Poll<Result<Option<HeaderMap>, Self::Error>> {
         match self.kind {
+            #[cfg(all(feature = "http2", any(feature = "client", feature = "server")))]
             Kind::H2 {
-                recv: ref mut h2, ..
+                recv: ref mut h2,
+                ref ping,
+                ..
             } => match ready!(h2.poll_trailers(cx)) {
-                Ok(t) => Poll::Ready(Ok(t)),
+                Ok(t) => {
+                    ping.record_non_data();
+                    Poll::Ready(Ok(t))
+                }
                 Err(e) => Poll::Ready(Err(crate::Error::new_h2(e))),
             },
             _ => Poll::Ready(Ok(None)),
@@ -334,6 +356,7 @@ impl HttpBody for Body {
         match self.kind {
             Kind::Once(ref val) => val.is_none(),
             Kind::Chan { content_length, .. } => content_length == DecodedLength::ZERO,
+            #[cfg(all(feature = "http2", any(feature = "client", feature = "server")))]
             Kind::H2 { recv: ref h2, .. } => h2.is_end_stream(),
             #[cfg(feature = "stream")]
             Kind::Wrapped(..) => false,
@@ -341,20 +364,26 @@ impl HttpBody for Body {
     }
 
     fn size_hint(&self) -> SizeHint {
+        macro_rules! opt_len {
+            ($content_length:expr) => {{
+                let mut hint = SizeHint::default();
+
+                if let Some(content_length) = $content_length.into_opt() {
+                    hint.set_exact(content_length);
+                }
+
+                hint
+            }};
+        }
+
         match self.kind {
             Kind::Once(Some(ref val)) => SizeHint::with_exact(val.len() as u64),
             Kind::Once(None) => SizeHint::with_exact(0),
             #[cfg(feature = "stream")]
             Kind::Wrapped(..) => SizeHint::default(),
-            Kind::Chan { content_length, .. } | Kind::H2 { content_length, .. } => {
-                let mut hint = SizeHint::default();
-
-                if let Some(content_length) = content_length.into_opt() {
-                    hint.set_exact(content_length);
-                }
-
-                hint
-            }
+            Kind::Chan { content_length, .. } => opt_len!(content_length),
+            #[cfg(all(feature = "http2", any(feature = "client", feature = "server")))]
+            Kind::H2 { content_length, .. } => opt_len!(content_length),
         }
     }
 }
@@ -397,16 +426,12 @@ impl Stream for Body {
 /// This function requires enabling the `stream` feature in your
 /// `Cargo.toml`.
 #[cfg(feature = "stream")]
-impl From<Box<dyn Stream<Item = Result<Bytes, Box<dyn StdError + Send + Sync>>> + Send + Sync>>
-    for Body
-{
+impl From<Box<dyn Stream<Item = Result<Bytes, Box<dyn StdError + Send + Sync>>> + Send>> for Body {
     #[inline]
     fn from(
-        stream: Box<
-            dyn Stream<Item = Result<Bytes, Box<dyn StdError + Send + Sync>>> + Send + Sync,
-        >,
+        stream: Box<dyn Stream<Item = Result<Bytes, Box<dyn StdError + Send + Sync>>> + Send>,
     ) -> Body {
-        Body::new(Kind::Wrapped(stream.into()))
+        Body::new(Kind::Wrapped(SyncWrapper::new(stream.into())))
     }
 }
 
@@ -527,6 +552,7 @@ impl Sender {
             .try_send(Err(crate::Error::new_body_write_aborted()));
     }
 
+    #[cfg(feature = "http1")]
     pub(crate) fn send_error(&mut self, err: crate::Error) {
         let _ = self.tx.try_send(Err(err));
     }
@@ -560,17 +586,17 @@ mod tests {
     fn test_size_of() {
         // These are mostly to help catch *accidentally* increasing
         // the size by too much.
-        assert_eq!(
-            mem::size_of::<Body>(),
-            mem::size_of::<usize>() * 5 + mem::size_of::<u64>(),
-            "Body"
+
+        let body_size = mem::size_of::<Body>();
+        let body_expected_size = mem::size_of::<u64>() * 6;
+        assert!(
+            body_size <= body_expected_size,
+            "Body size = {} <= {}",
+            body_size,
+            body_expected_size,
         );
 
-        assert_eq!(
-            mem::size_of::<Body>(),
-            mem::size_of::<Option<Body>>(),
-            "Option<Body>"
-        );
+        assert_eq!(body_size, mem::size_of::<Option<Body>>(), "Option<Body>");
 
         assert_eq!(
             mem::size_of::<Sender>(),

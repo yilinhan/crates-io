@@ -11,6 +11,12 @@ use tokio::sync::{Barrier, RwLock};
 use tokio_test::task::spawn;
 use tokio_test::{assert_pending, assert_ready};
 
+#[test]
+fn into_inner() {
+    let rwlock = RwLock::new(42);
+    assert_eq!(rwlock.into_inner(), 42);
+}
+
 // multiple reads should be Ready
 #[test]
 fn read_shared() {
@@ -160,7 +166,7 @@ async fn write_order() {
 }
 
 // A single RwLock is contested by tasks in multiple threads
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 8)]
 async fn multithreaded() {
     let barrier = Arc::new(Barrier::new(5));
     let rwlock = Arc::new(RwLock::<u32>::new(0));
@@ -228,4 +234,37 @@ async fn multithreaded() {
     barrier.wait().await;
     let g = rwlock.read().await;
     assert_eq!(*g, 17_000);
+}
+
+#[tokio::test]
+async fn try_write() {
+    let lock = RwLock::new(0);
+    let read_guard = lock.read().await;
+    assert!(lock.try_write().is_err());
+    drop(read_guard);
+    assert!(lock.try_write().is_ok());
+}
+
+#[test]
+fn try_read_try_write() {
+    let lock: RwLock<usize> = RwLock::new(15);
+
+    {
+        let rg1 = lock.try_read().unwrap();
+        assert_eq!(*rg1, 15);
+
+        assert!(lock.try_write().is_err());
+
+        let rg2 = lock.try_read().unwrap();
+        assert_eq!(*rg2, 15)
+    }
+
+    {
+        let mut wg = lock.try_write().unwrap();
+        *wg = 1515;
+
+        assert!(lock.try_read().is_err())
+    }
+
+    assert_eq!(*lock.try_read().unwrap(), 1515);
 }

@@ -577,6 +577,8 @@ pub const SYS_pkey_mprotect: ::c_long = 5000 + 323;
 pub const SYS_pkey_alloc: ::c_long = 5000 + 324;
 pub const SYS_pkey_free: ::c_long = 5000 + 325;
 pub const SYS_statx: ::c_long = 5000 + 326;
+pub const SYS_pidfd_open: ::c_long = 5000 + 434;
+pub const SYS_clone3: ::c_long = 5000 + 435;
 
 pub const SFD_CLOEXEC: ::c_int = 0x080000;
 
@@ -874,6 +876,8 @@ pub const TCSETAF: ::c_ulong = 0x5404;
 pub const TCSBRK: ::c_ulong = 0x5405;
 pub const TCXONC: ::c_ulong = 0x5406;
 pub const TCFLSH: ::c_ulong = 0x5407;
+pub const TIOCSBRK: ::c_ulong = 0x5427;
+pub const TIOCCBRK: ::c_ulong = 0x5428;
 pub const TIOCGSOFTCAR: ::c_ulong = 0x5481;
 pub const TIOCSSOFTCAR: ::c_ulong = 0x5482;
 pub const TIOCINQ: ::c_ulong = 0x467f;
@@ -1000,7 +1004,6 @@ pub const TIOCM_DSR: ::c_int = 0x400;
 
 pub const EHWPOISON: ::c_int = 168;
 
-#[link(name = "util")]
 extern "C" {
     pub fn sysctl(
         name: *mut ::c_int,

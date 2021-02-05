@@ -1,3 +1,23 @@
+# 0.1.17
+
+* Use caret dependencies to allow -registry 1.3.
+
+# 0.1.16
+
+* Fix possible blocking in signal handler registered by `Signals`.
+
+# 0.1.15
+
+* Make `Signals` work in edge-triggered mode in mio too, by always draining
+  everything from the socket. Needed, because mio 0.7 doesn't have
+  level-triggered any more.
+
+# 0.1.14
+
+* `mio-0_7-support` feature for use with mio 0.7.0+.
+* Bump minimal rustc version to 1.31.0 (signal-hook-registry can still build
+  with 1.26.0).
+
 # 0.1.13
 
 * Some doc clarifications.

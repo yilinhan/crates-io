@@ -11,19 +11,9 @@ unsafe impl Send for AtomicU32 {}
 unsafe impl Sync for AtomicU32 {}
 
 impl AtomicU32 {
-    pub(crate) fn new(val: u32) -> AtomicU32 {
+    pub(crate) const fn new(val: u32) -> AtomicU32 {
         let inner = UnsafeCell::new(std::sync::atomic::AtomicU32::new(val));
         AtomicU32 { inner }
-    }
-
-    /// Performs an unsynchronized load.
-    ///
-    /// # Safety
-    ///
-    /// All mutations must have happened before the unsynchronized load.
-    /// Additionally, there must be no concurrent mutations.
-    pub(crate) unsafe fn unsync_load(&self) -> u32 {
-        *(*self.inner.get()).get_mut()
     }
 }
 

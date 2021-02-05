@@ -1,4 +1,5 @@
 #![allow(non_camel_case_types, unstable_name_collisions)]
+#![cfg_attr(not(feature = "std"), no_std)]
 
 //! Standback backports a number of methods, structs, and macros that have been
 //! stabilized in the Rust standard library since 1.31.0. This allows crate
@@ -39,9 +40,146 @@
 //!
 //! # Methods on existing structs
 //!
-//! The following methods are available via the prelude:
+//! The following methods and constants are available via the prelude:
 //!
 //! ```rust,ignore
+//! // 1.50
+//! bool::then
+//! btree_map::Entry::or_insert_with_key
+//! hash_map::Entry::or_insert_with_key
+//! f32::clamp
+//! f64::clamp
+//! Ord::clamp
+//! RefCell::take
+//! slice::fill
+//! UnsafeCell::get_mut
+//!
+//! // 1.49
+//! slice::select_nth_unstable
+//! slice::select_nth_unstable_by
+//! slice::select_nth_unstable_by_key
+//!
+//! // 1.48
+//! slice::as_ptr_range
+//! slice::as_mut_ptr_range
+//!
+//! // 1.47
+//! Range::is_empty
+//! Result::as_deref
+//! Result::as_deref_mut
+//! Vec::leak
+//! f32::TAU
+//! f64::TAU
+//!
+//! // 1.46
+//! i8::leading_ones
+//! i8::trailing_ones
+//! i16::leading_ones
+//! i16::trailing_ones
+//! i32::leading_ones
+//! i32::trailing_ones
+//! i64::leading_ones
+//! i64::trailing_ones
+//! i128::leading_ones
+//! i128::trailing_ones
+//! isize::leading_ones
+//! isize::trailing_ones
+//! u8::leading_ones
+//! u8::trailing_ones
+//! u16::leading_ones
+//! u16::trailing_ones
+//! u32::leading_ones
+//! u32::trailing_ones
+//! u64::leading_ones
+//! u64::trailing_ones
+//! u128::leading_ones
+//! u128::trailing_ones
+//! usize::leading_ones
+//! usize::trailing_ones
+//! Option::zip
+//!
+//! // 1.45
+//! i8::saturating_abs
+//! i8::saturating_neg
+//! i16::saturating_abs
+//! i16::saturating_neg
+//! i32::saturating_abs
+//! i32::saturating_neg
+//! i64::saturating_abs
+//! i64::saturating_neg
+//! i128::saturating_abs
+//! i128::saturating_neg
+//! isize::saturating_abs
+//! isize::saturating_neg
+//!
+//! // 1.44
+//! PathBuf::with_capacity
+//! PathBuf::capacity
+//! PathBuf::clear
+//! PathBuf::reserve
+//! PathBuf::reserve_exact
+//! PathBuf::shrink_to_fit
+//! Layout::align_to
+//! Layout::pad_to_align
+//! Layout::array
+//! Layout::extend
+//! f32::to_int_unchecked
+//! f64::to_int_unchecked
+//!
+//! // 1.43
+//! f32::RADIX
+//! f32::MANTISSA_DIGITS
+//! f32::DIGITS
+//! f32::EPSILON
+//! f32::MIN
+//! f32::MIN_POSITIVE
+//! f32::MAX
+//! f32::MIN_EXP
+//! f32::MAX_EXP
+//! f32::MIN_10_EXP
+//! f32::MAX_10_EXP
+//! f32::NAN
+//! f32::INFINITY
+//! f32::NEG_INFINITY
+//! f64::RADIX
+//! f64::MANTISSA_DIGITS
+//! f64::DIGITS
+//! f64::EPSILON
+//! f64::MIN
+//! f64::MIN_POSITIVE
+//! f64::MAX
+//! f64::MIN_EXP
+//! f64::MAX_EXP
+//! f64::MIN_10_EXP
+//! f64::MAX_10_EXP
+//! f64::NAN
+//! f64::INFINITY
+//! f64::NEG_INFINITY
+//! u8::MIN
+//! u8::MAX
+//! u16::MIN
+//! u16::MAX
+//! u32::MIN
+//! u32::MAX
+//! u64::MIN
+//! u64::MAX
+//! u128::MIN
+//! u128::MAX
+//! usize::MIN
+//! usize::MAX
+//! i8::MIN
+//! i8::MAX
+//! i16::MIN
+//! i16::MAX
+//! i32::MIN
+//! i32::MAX
+//! i64::MIN
+//! i64::MAX
+//! i128::MIN
+//! i128::MAX
+//! isize::MIN
+//! isize::MAX
+//!
 //! // 1.42
 //! CondVar::wait_while
 //! CondVar::wait_timeout_while
@@ -348,6 +486,14 @@
 //! # Other APIs implemented
 //!
 //! ```rust,ignore
+//! future::pending // 1.48, requires rustc 1.36
+//! future::ready // 1.48, requires rustc 1.36
+//! char::UNICODE_VERSION // 1.45
+//! f32::LOG10_2 // 1.43
+//! f32::LOG2_10 // 1.43
+//! f64::LOG10_2 // 1.43
+//! f64::LOG2_10 // 1.43
+//! iter::once_with // 1.43
 //! mem::take // 1.40
 //! iterator::Copied // 1.36
 //! array::TryFromSliceError // 1.36
@@ -372,133 +518,253 @@
 
 #![deny(rust_2018_idioms, unused_qualifications)]
 
-#[cfg(before_1_32)]
+// A few traits to make sealing other traits simpler.
+mod traits {
+    pub trait Sealed<T: ?Sized> {}
+    impl<T: ?Sized> Sealed<T> for T {}
+
+    macro_rules! impl_trait_for_all {
+        ($trait:ident => $($type:ty)+) => {$(
+            impl $trait for $type {}
+        )+};
+    }
+
+    pub trait Integer: Sized {}
+    impl_trait_for_all!(Integer => i8 i16 i32 i64 i128 isize u8 u16 u32 u64 u128 usize);
+
+    pub trait SignedInteger {}
+    impl_trait_for_all!(SignedInteger => i8 i16 i32 i64 i128 isize);
+
+    pub trait UnsignedInteger {}
+    impl_trait_for_all!(UnsignedInteger => u8 u16 u32 u64 u128 usize);
+
+    pub trait Float {}
+    impl_trait_for_all!(Float => f32 f64);
+}
+
+#[cfg(__standback_before_1_32)]
 mod v1_32;
-#[cfg(before_1_33)]
+#[cfg(__standback_before_1_33)]
 mod v1_33;
-#[cfg(before_1_34)]
+#[cfg(__standback_before_1_34)]
 mod v1_34;
-#[cfg(before_1_35)]
+#[cfg(__standback_before_1_35)]
 mod v1_35;
-#[cfg(before_1_36)]
+#[cfg(__standback_before_1_36)]
 mod v1_36;
-#[cfg(before_1_37)]
+#[cfg(__standback_before_1_37)]
 mod v1_37;
-#[cfg(before_1_38)]
+#[cfg(__standback_before_1_38)]
 mod v1_38;
-#[cfg(before_1_39)]
-mod v1_39;
-#[cfg(before_1_40)]
+#[cfg(__standback_before_1_40)]
 mod v1_40;
-#[cfg(before_1_41)]
+#[cfg(__standback_before_1_41)]
 mod v1_41;
-#[cfg(before_1_42)]
+#[cfg(__standback_before_1_42)]
 mod v1_42;
+#[cfg(__standback_before_1_43)]
+mod v1_43;
+#[cfg(__standback_before_1_44)]
+mod v1_44;
+#[cfg(__standback_before_1_45)]
+mod v1_45;
+#[cfg(__standback_before_1_46)]
+mod v1_46;
+#[cfg(__standback_before_1_47)]
+mod v1_47;
+#[cfg(__standback_before_1_48)]
+mod v1_48;
+#[cfg(__standback_before_1_49)]
+mod v1_49;
+#[cfg(__standback_before_1_50)]
+mod v1_50;
 
 pub mod prelude {
-    #[cfg(before_1_42)]
+    #[cfg(__standback_before_1_42)]
     pub use crate::matches;
-    #[cfg(before_1_32)]
+    #[cfg(__standback_before_1_32)]
     pub use crate::v1_32::{
         i128_v1_32, i16_v1_32, i32_v1_32, i64_v1_32, i8_v1_32, isize_v1_32, u128_v1_32, u16_v1_32,
         u32_v1_32, u64_v1_32, u8_v1_32, usize_v1_32,
     };
-    #[cfg(all(std, before_1_33, target_family = "unix"))]
+    #[cfg(all(feature = "std", __standback_before_1_33, target_family = "unix"))]
     pub use crate::v1_33::UnixFileExt_v1_33;
-    #[cfg(all(std, before_1_33))]
+    #[cfg(all(feature = "std", __standback_before_1_33))]
     pub use crate::v1_33::VecDeque_v1_33;
-    #[cfg(before_1_33)]
+    #[cfg(__standback_before_1_33)]
     pub use crate::v1_33::{Duration_v1_33, Option_v1_33, Result_v1_33};
-    #[cfg(before_1_34)]
+    #[cfg(__standback_before_1_34)]
     pub use crate::v1_34::{Pow_v1_34, Slice_v1_34};
-    #[cfg(before_1_35)]
+    #[cfg(__standback_before_1_35)]
     pub use crate::v1_35::{Option_v1_35, RangeBounds_v1_35, RefCell_v1_35};
-    #[cfg(before_1_36)]
+    #[cfg(__standback_before_1_36)]
     pub use crate::v1_36::{str_v1_36, Iterator_v1_36};
-    #[cfg(before_1_37)]
+    #[cfg(__standback_before_1_37)]
     pub use crate::v1_37::{
         Cell_v1_37, Cell_v1_37_, DoubleEndedIterator_v1_37, Option_v1_37, Slice_v1_37,
     };
-    #[cfg(before_1_38)]
+    #[cfg(__standback_before_1_38)]
     pub use crate::v1_38::{
         ConstPtr_v1_38, Duration_v1_38, EuclidFloat_v1_38, Euclid_v1_38, MutPtr_v1_38,
     };
-    #[cfg(before_1_40)]
-    pub use crate::v1_40::{f32_v1_40, f64_v1_40, slice_v1_40, Option_v1_40, Option_v1_40_};
-    #[cfg(before_1_41)]
+    #[cfg(all(feature = "std", __standback_before_1_40))]
+    pub use crate::v1_40::slice_v1_40;
+    #[cfg(__standback_before_1_40)]
+    pub use crate::v1_40::{f32_v1_40, f64_v1_40, Option_v1_40, Option_v1_40_};
+    #[cfg(__standback_before_1_41)]
     pub use crate::v1_41::Result_v1_41;
-    #[cfg(before_1_42)]
-    pub use crate::v1_42::{Condvar_v1_42, ManuallyDrop_v1_42};
-    #[cfg(before_1_39)]
+    #[cfg(all(__standback_before_1_42, feature = "std"))]
+    pub use crate::v1_42::Condvar_v1_42;
+    #[cfg(__standback_before_1_42)]
+    pub use crate::v1_42::ManuallyDrop_v1_42;
+    #[cfg(__standback_before_1_43)]
+    pub use crate::v1_43::{float_v1_43, int_v1_43};
+    #[cfg(__standback_before_1_44)]
+    pub use crate::v1_44::Layout_v1_44;
+    #[cfg(all(__standback_before_1_44, feature = "std"))]
+    pub use crate::v1_44::PathBuf_v1_44;
+    #[cfg(__standback_before_1_45)]
+    pub use crate::v1_45::int_v1_45;
+    #[cfg(__standback_before_1_46)]
+    pub use crate::v1_46::{int_v1_46, Option_v1_46};
+    #[cfg(all(feature = "std", __standback_before_1_47))]
+    pub use crate::v1_47::Vec_v1_47;
+    #[cfg(__standback_before_1_47)]
+    pub use crate::v1_47::{Range_v1_47, Result_v1_47};
+    #[cfg(__standback_before_1_48)]
+    pub use crate::v1_48::Slice_v1_48;
+    #[cfg(__standback_before_1_49)]
+    pub use crate::v1_49::Slice_v1_49;
+    #[cfg(all(__standback_before_1_50, feature = "std"))]
+    pub use crate::v1_50::{BTreeMapEntry_v1_50, HashMapEntry_v1_50};
+    #[cfg(__standback_before_1_50)]
+    pub use crate::v1_50::{
+        Bool_v1_50, Float_v1_50, Ord_v1_50, RefCell_v1_50, Slice_v1_50, UnsafeCell_v1_50,
+    };
+    #[cfg(__standback_before_1_39)]
     pub use core::unimplemented as todo;
 }
 
 pub mod mem {
-    #[cfg(before_1_40)]
+    #[cfg(__standback_before_1_40)]
     pub use crate::v1_40::take;
-    #[cfg(since_1_40)]
+    #[cfg(__standback_since_1_40)]
     pub use core::mem::take;
 
-    #[cfg(before_1_36)]
+    #[cfg(__standback_before_1_36)]
     pub use crate::v1_36::MaybeUninit;
-    #[cfg(since_1_36)]
+    #[cfg(__standback_since_1_36)]
     pub use core::mem::MaybeUninit;
 }
 pub mod convert {
-    #[cfg(before_1_33)]
+    #[cfg(__standback_before_1_33)]
     pub use crate::v1_33::identity;
-    #[cfg(since_1_33)]
+    #[cfg(__standback_since_1_33)]
     pub use core::convert::identity;
 
-    #[cfg(before_1_34)]
+    #[cfg(__standback_before_1_34)]
     pub use crate::v1_34::Infallible;
-    #[cfg(since_1_34)]
+    #[cfg(__standback_since_1_34)]
     pub use core::convert::Infallible;
 
-    #[cfg(before_1_34)]
-    pub use crate::v1_34::{TryFrom, TryFromIntError, TryInto};
-    #[cfg(after_1_34)]
-    pub use core::convert::{TryFrom, TryFromIntError, TryInto};
+    #[cfg(__standback_before_1_34)]
+    pub use crate::v1_34::{TryFrom, TryInto};
+    #[cfg(__standback_since_1_34)]
+    pub use core::convert::{TryFrom, TryInto};
+}
+pub mod num {
+    #[cfg(__standback_before_1_34)]
+    pub use crate::v1_34::TryFromIntError;
+    #[cfg(__standback_since_1_34)]
+    pub use core::num::TryFromIntError;
 }
 pub mod iter {
-    #[cfg(before_1_36)]
+    #[cfg(__standback_before_1_36)]
     pub use crate::v1_36::Copied;
-    #[cfg(since_1_36)]
+    #[cfg(__standback_since_1_36)]
     pub use core::iter::Copied;
 
-    #[cfg(before_1_34)]
+    #[cfg(__standback_before_1_34)]
     pub use crate::v1_34::{from_fn, successors};
-    #[cfg(since_1_34)]
+    #[cfg(__standback_since_1_34)]
     pub use core::iter::{from_fn, successors};
+
+    #[cfg(__standback_before_1_43)]
+    pub use crate::v1_43::{once_with, OnceWith};
+    #[cfg(__standback_since_1_43)]
+    pub use core::iter::{once_with, OnceWith};
 }
 pub mod marker {
-    #[cfg(before_1_33)]
+    #[cfg(__standback_before_1_33)]
     pub use crate::v1_33::Unpin;
-    #[cfg(since_1_33)]
+    #[cfg(__standback_since_1_33)]
     pub use core::marker::Unpin;
 }
 pub mod pin {
-    #[cfg(before_1_33)]
+    #[cfg(__standback_before_1_33)]
     pub use crate::v1_33::Pin;
-    #[cfg(since_1_33)]
+    #[cfg(__standback_since_1_33)]
     pub use core::pin::Pin;
 }
 pub mod task {
-    #[cfg(before_1_36)]
+    #[cfg(__standback_before_1_36)]
     pub use crate::v1_36::{Context, Poll, RawWaker, RawWakerVTable, Waker};
-    #[cfg(since_1_36)]
+    #[cfg(__standback_since_1_36)]
     pub use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 }
 pub mod ptr {
-    #[cfg(before_1_35)]
+    #[cfg(__standback_before_1_35)]
     pub use crate::v1_35::hash;
-    #[cfg(since_1_35)]
+    #[cfg(__standback_since_1_35)]
     pub use core::ptr::hash;
 }
-
 pub mod array {
-    #[cfg(before_1_36)]
+    #[cfg(__standback_before_1_36)]
     pub use crate::v1_36::TryFromSliceError;
-    #[cfg(since_1_36)]
+    #[cfg(__standback_since_1_36)]
     pub use core::array::TryFromSliceError;
+}
+pub mod f32 {
+    pub mod consts {
+        #[cfg(__standback_before_1_43)]
+        pub use crate::v1_43::f32::{LOG10_2, LOG2_10};
+        #[cfg(__standback_since_1_43)]
+        pub use core::f32::consts::{LOG10_2, LOG2_10};
+
+        #[cfg(__standback_before_1_47)]
+        pub use crate::v1_47::f32::TAU;
+        #[cfg(__standback_since_1_47)]
+        pub use core::f32::consts::TAU;
+    }
+}
+pub mod f64 {
+    pub mod consts {
+        #[cfg(__standback_before_1_43)]
+        pub use crate::v1_43::f64::{LOG10_2, LOG2_10};
+        #[cfg(__standback_since_1_43)]
+        pub use core::f64::consts::{LOG10_2, LOG2_10};
+
+        #[cfg(__standback_before_1_47)]
+        pub use crate::v1_47::f64::TAU;
+        #[cfg(__standback_since_1_47)]
+        pub use core::f64::consts::TAU;
+    }
+}
+pub mod char {
+    #[cfg(__standback_before_1_38)]
+    pub const UNICODE_VERSION: (u8, u8, u8) = (11, 0, 0);
+    #[cfg(all(__standback_since_1_38, __standback_before_1_44))]
+    pub const UNICODE_VERSION: (u8, u8, u8) = (12, 1, 0);
+    #[cfg(all(__standback_since_1_44, __standback_before_1_45))]
+    pub const UNICODE_VERSION: (u8, u8, u8) = (13, 0, 0);
+    #[cfg(__standback_since_1_45)]
+    pub use core::char::UNICODE_VERSION;
+}
+
+#[cfg(__standback_since_1_36)]
+pub mod future {
+    #[cfg(__standback_before_1_48)]
+    pub use crate::v1_48::future::{pending, ready, Pending, Ready};
+    #[cfg(__standback_since_1_48)]
+    pub use core::future::{pending, ready, Pending, Ready};
 }

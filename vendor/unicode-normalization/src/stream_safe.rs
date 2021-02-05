@@ -1,12 +1,9 @@
-use normalize::{
-    hangul_decomposition_length,
-    is_hangul_syllable,
-};
-use lookups::{
+use crate::lookups::{
     canonical_combining_class, canonical_fully_decomposed, compatibility_fully_decomposed,
     stream_safe_trailing_nonstarters,
 };
-use tables::stream_safe_leading_nonstarters;
+use crate::normalize::{hangul_decomposition_length, is_hangul_syllable};
+use crate::tables::stream_safe_leading_nonstarters;
 
 pub(crate) const MAX_NONSTARTERS: usize = 30;
 const COMBINING_GRAPHEME_JOINER: char = '\u{034F}';
@@ -22,11 +19,15 @@ pub struct StreamSafe<I> {
 
 impl<I> StreamSafe<I> {
     pub(crate) fn new(iter: I) -> Self {
-        Self { iter, nonstarter_count: 0, buffer: None }
+        Self {
+            iter,
+            nonstarter_count: 0,
+            buffer: None,
+        }
     }
 }
 
-impl<I: Iterator<Item=char>> Iterator for StreamSafe<I> {
+impl<I: Iterator<Item = char>> Iterator for StreamSafe<I> {
     type Item = char;
 
     #[inline]
@@ -41,7 +42,7 @@ impl<I: Iterator<Item=char>> Iterator for StreamSafe<I> {
         let d = classify_nonstarters(next_ch);
         if self.nonstarter_count + d.leading_nonstarters > MAX_NONSTARTERS {
             self.buffer = Some(next_ch);
-            self.nonstarter_count = 0;
+            self.nonstarter_count = d.decomposition_len;
             return Some(COMBINING_GRAPHEME_JOINER);
         }
 
@@ -72,7 +73,7 @@ pub(crate) fn classify_nonstarters(c: char) -> Decomposition {
             leading_nonstarters: 0,
             trailing_nonstarters: 0,
             decomposition_len: 1,
-        }
+        };
     }
     // Next, special case Hangul, since it's not handled by our tables.
     if is_hangul_syllable(c) {
@@ -82,15 +83,12 @@ pub(crate) fn classify_nonstarters(c: char) -> Decomposition {
             decomposition_len: hangul_decomposition_length(c),
         };
     }
-    let decomp = compatibility_fully_decomposed(c)
-        .or_else(|| canonical_fully_decomposed(c));
+    let decomp = compatibility_fully_decomposed(c).or_else(|| canonical_fully_decomposed(c));
     match decomp {
-        Some(decomp) => {
-            Decomposition {
-                leading_nonstarters: stream_safe_leading_nonstarters(c),
-                trailing_nonstarters: stream_safe_trailing_nonstarters(c),
-                decomposition_len: decomp.len(),
-            }
+        Some(decomp) => Decomposition {
+            leading_nonstarters: stream_safe_leading_nonstarters(c),
+            trailing_nonstarters: stream_safe_trailing_nonstarters(c),
+            decomposition_len: decomp.len(),
         },
         None => {
             let is_nonstarter = canonical_combining_class(c) != 0;
@@ -106,13 +104,14 @@ pub(crate) fn classify_nonstarters(c: char) -> Decomposition {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        StreamSafe,
-        classify_nonstarters,
-    };
-    use std::char;
-    use normalize::decompose_compatible;
-    use lookups::canonical_combining_class;
+    use super::{classify_nonstarters, StreamSafe};
+    use crate::lookups::canonical_combining_class;
+    use crate::normalize::decompose_compatible;
+
+    #[cfg(not(feature = "std"))]
+    use crate::no_std_prelude::*;
+
+    use core::char;
 
     fn stream_safe(s: &str) -> String {
         StreamSafe::new(s.chars()).collect()
@@ -124,7 +123,12 @@ mod tests {
         assert_eq!(stream_safe(technically_okay), technically_okay);
 
         let too_much = "Da\u{0300}\u{0301}\u{0302}\u{0303}\u{0304}\u{0305}\u{0306}\u{0307}\u{0308}\u{0309}\u{030a}\u{030b}\u{030c}\u{030d}\u{030e}\u{030f}\u{0310}\u{0311}\u{0312}\u{0313}\u{0314}\u{0315}\u{0316}\u{0317}\u{0318}\u{0319}\u{031a}\u{031b}\u{031c}\u{031d}\u{032e}ngerzone";
-        assert_ne!(stream_safe(too_much), too_much);
+        let fixed_it = "Da\u{0300}\u{0301}\u{0302}\u{0303}\u{0304}\u{0305}\u{0306}\u{0307}\u{0308}\u{0309}\u{030a}\u{030b}\u{030c}\u{030d}\u{030e}\u{030f}\u{0310}\u{0311}\u{0312}\u{0313}\u{0314}\u{0315}\u{0316}\u{0317}\u{0318}\u{0319}\u{031a}\u{031b}\u{031c}\u{031d}\u{034f}\u{032e}ngerzone";
+        assert_eq!(stream_safe(too_much), fixed_it);
+
+        let woah_nelly = "Da\u{0300}\u{0301}\u{0302}\u{0303}\u{0304}\u{0305}\u{0306}\u{0307}\u{0308}\u{0309}\u{030a}\u{030b}\u{030c}\u{030d}\u{030e}\u{030f}\u{0310}\u{0311}\u{0312}\u{0313}\u{0314}\u{0315}\u{0316}\u{0317}\u{0318}\u{0319}\u{031a}\u{031b}\u{031c}\u{031d}\u{032e}\u{0300}\u{0301}\u{0302}\u{0303}\u{0304}\u{0305}\u{0306}\u{0307}\u{0308}\u{0309}\u{030a}\u{030b}\u{030c}\u{030d}\u{030e}\u{030f}\u{0310}\u{0311}\u{0312}\u{0313}\u{0314}\u{0315}\u{0316}\u{0317}\u{0318}\u{0319}\u{031a}\u{031b}\u{031c}\u{031d}\u{032e}ngerzone";
+        let its_cool = "Da\u{0300}\u{0301}\u{0302}\u{0303}\u{0304}\u{0305}\u{0306}\u{0307}\u{0308}\u{0309}\u{030a}\u{030b}\u{030c}\u{030d}\u{030e}\u{030f}\u{0310}\u{0311}\u{0312}\u{0313}\u{0314}\u{0315}\u{0316}\u{0317}\u{0318}\u{0319}\u{031a}\u{031b}\u{031c}\u{031d}\u{034f}\u{032e}\u{0300}\u{0301}\u{0302}\u{0303}\u{0304}\u{0305}\u{0306}\u{0307}\u{0308}\u{0309}\u{030a}\u{030b}\u{030c}\u{030d}\u{030e}\u{030f}\u{0310}\u{0311}\u{0312}\u{0313}\u{0314}\u{0315}\u{0316}\u{0317}\u{0318}\u{0319}\u{031a}\u{031b}\u{031c}\u{034f}\u{031d}\u{032e}ngerzone";
+        assert_eq!(stream_safe(woah_nelly), its_cool);
     }
 
     #[test]
@@ -136,7 +140,7 @@ mod tests {
                 None => continue,
             };
             let c = classify_nonstarters(ch);
-            let mut s = vec![];
+            let mut s = Vec::new();
             decompose_compatible(ch, |c| s.push(c));
 
             assert_eq!(s.len(), c.decomposition_len);

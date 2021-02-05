@@ -66,9 +66,14 @@ fn main() {
     }
 
     // Non-zero integers stabilized in Rust 1.28:
-    // https://github.com/rust-lang/rust/pull/50808
+    // https://blog.rust-lang.org/2018/08/02/Rust-1.28.html#library-stabilizations
     if minor >= 28 {
         println!("cargo:rustc-cfg=num_nonzero");
+    }
+
+    // Current minimum supported version of serde_derive crate is Rust 1.31.
+    if minor >= 31 {
+        println!("cargo:rustc-cfg=serde_derive");
     }
 
     // TryFrom, Atomic types, and non-zero signed integers stabilized in Rust 1.34:

@@ -1,20 +1,9 @@
 //! Wrappers around the OSX Security Framework.
-
 #![warn(missing_docs)]
 #![allow(non_upper_case_globals)]
 
-extern crate security_framework_sys;
 #[macro_use]
 extern crate core_foundation;
-extern crate core_foundation_sys;
-#[cfg(target_os = "macos")]
-#[macro_use]
-extern crate bitflags;
-
-#[cfg(test)]
-extern crate hex;
-#[cfg(test)]
-extern crate tempdir;
 
 use core_foundation_sys::base::OSStatus;
 use security_framework_sys::base::errSecSuccess;
@@ -35,7 +24,7 @@ macro_rules! p {
     };
 }
 
-#[cfg(all(not(feature = "OSX_10_13"), feature = "alpn"))]
+#[cfg(all(not(feature = "OSX_10_13"), any(feature = "alpn", feature = "session-tickets")))]
 #[macro_use]
 mod dlsym;
 

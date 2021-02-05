@@ -1,9 +1,10 @@
 use crate::runtime;
 use crate::task::JoinHandle;
+use crate::util::error::CONTEXT_MISSING_ERROR;
 
 use std::future::Future;
 
-doc_rt_core! {
+cfg_rt! {
     /// Spawns a new asynchronous task, returning a
     /// [`JoinHandle`](super::JoinHandle) for it.
     ///
@@ -15,6 +16,10 @@ doc_rt_core! {
     /// There is no guarantee that a spawned task will execute to completion.
     /// When a runtime is shutdown, all outstanding tasks are dropped,
     /// regardless of the lifecycle of that task.
+    ///
+    /// This function must be called from the context of a Tokio runtime. Tasks running on
+    /// the Tokio runtime are always inside its context, but you can also enter the context
+    /// using the [`Runtime::enter`](crate::runtime::Runtime::enter()) method.
     ///
     /// # Examples
     ///
@@ -33,7 +38,7 @@ doc_rt_core! {
     ///
     /// #[tokio::main]
     /// async fn main() -> io::Result<()> {
-    ///     let mut listener = TcpListener::bind("127.0.0.1:8080").await?;
+    ///     let listener = TcpListener::bind("127.0.0.1:8080").await?;
     ///
     ///     loop {
     ///         let (socket, _) = listener.accept().await?;
@@ -118,13 +123,15 @@ doc_rt_core! {
     /// ```text
     /// error[E0391]: cycle detected when processing `main`
     /// ```
+    #[cfg_attr(tokio_track_caller, track_caller)]
     pub fn spawn<T>(task: T) -> JoinHandle<T::Output>
     where
         T: Future + Send + 'static,
         T::Output: Send + 'static,
     {
         let spawn_handle = runtime::context::spawn_handle()
-        .expect("must be called from the context of Tokio runtime configured with either `basic_scheduler` or `threaded_scheduler`");
+        .expect(CONTEXT_MISSING_ERROR);
+        let task = crate::util::trace::task(task, "task");
         spawn_handle.spawn(task)
     }
 }

@@ -21,8 +21,9 @@
 //! to a single connection. It defines how to respond to **all** requests that
 //! connection will receive.
 //!
-//! While it's possible to implement `Service` for a type manually, the helper
-//! [`service_fn`](service_fn) should be sufficient for most cases.
+//! The helper [`service_fn`](service_fn) should be sufficient for most cases, but
+//! if you need to implement `Service` for a type manually, you can follow the example
+//! in `service_struct_impl.rs`.
 //!
 //! # MakeService
 //!
@@ -38,11 +39,20 @@ pub use tower_service::Service;
 
 mod http;
 mod make;
+#[cfg(any(feature = "http1", feature = "http2"))]
+#[cfg(feature = "client")]
 mod oneshot;
 mod util;
 
 pub(crate) use self::http::HttpService;
-pub(crate) use self::make::{MakeConnection, MakeServiceRef};
+#[cfg(any(feature = "http1", feature = "http2"))]
+#[cfg(feature = "client")]
+pub(crate) use self::make::MakeConnection;
+#[cfg(any(feature = "http1", feature = "http2"))]
+#[cfg(feature = "server")]
+pub(crate) use self::make::MakeServiceRef;
+#[cfg(any(feature = "http1", feature = "http2"))]
+#[cfg(feature = "client")]
 pub(crate) use self::oneshot::{oneshot, Oneshot};
 
 pub use self::make::make_service_fn;

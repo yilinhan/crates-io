@@ -13,7 +13,7 @@
 [package]
 edition = "2018"
 name = "raw-cpuid"
-version = "8.1.1"
+version = "8.1.2"
 authors = ["Gerd Zellweger <mail@gerdzellweger.com>"]
 build = "build.rs"
 description = "A library to parse the x86 CPUID instruction, written in rust with no external dependencies. The implementation closely resembles the Intel CPUID manual description. The library does only depend on libcore."

@@ -60,6 +60,7 @@ pub struct Config {
     generator: Option<OsString>,
     cflags: OsString,
     cxxflags: OsString,
+    asmflags: OsString,
     defines: Vec<(OsString, OsString)>,
     deps: Vec<String>,
     target: Option<String>,
@@ -75,6 +76,7 @@ pub struct Config {
     no_build_target: bool,
     verbose_cmake: bool,
     verbose_make: bool,
+    pic: Option<bool>,
 }
 
 /// Builds the native library rooted at `path` with the default cmake options.
@@ -98,6 +100,77 @@ pub fn build<P: AsRef<Path>>(path: P) -> PathBuf {
 }
 
 impl Config {
+    /// Return explicitly set profile or infer `CMAKE_BUILD_TYPE` from Rust's compilation profile.
+    ///
+    /// * if `opt-level=0` then `CMAKE_BUILD_TYPE=Debug`,
+    /// * if `opt-level={1,2,3}` and:
+    ///   * `debug=false` then `CMAKE_BUILD_TYPE=Release`
+    ///   * otherwise `CMAKE_BUILD_TYPE=RelWithDebInfo`
+    /// * if `opt-level={s,z}` then `CMAKE_BUILD_TYPE=MinSizeRel`
+    pub fn get_profile(&self) -> &str {
+        if let Some(profile) = self.profile.as_ref() {
+            profile
+        } else {
+            // Determine Rust's profile, optimization level, and debug info:
+            #[derive(PartialEq)]
+            enum RustProfile {
+                Debug,
+                Release,
+            }
+            #[derive(PartialEq, Debug)]
+            enum OptLevel {
+                Debug,
+                Release,
+                Size,
+            }
+
+            let rust_profile = match &getenv_unwrap("PROFILE")[..] {
+                "debug" => RustProfile::Debug,
+                "release" | "bench" => RustProfile::Release,
+                unknown => {
+                    eprintln!(
+                        "Warning: unknown Rust profile={}; defaulting to a release build.",
+                        unknown
+                    );
+                    RustProfile::Release
+                }
+            };
+
+            let opt_level = match &getenv_unwrap("OPT_LEVEL")[..] {
+                "0" => OptLevel::Debug,
+                "1" | "2" | "3" => OptLevel::Release,
+                "s" | "z" => OptLevel::Size,
+                unknown => {
+                    let default_opt_level = match rust_profile {
+                        RustProfile::Debug => OptLevel::Debug,
+                        RustProfile::Release => OptLevel::Release,
+                    };
+                    eprintln!(
+                        "Warning: unknown opt-level={}; defaulting to a {:?} build.",
+                        unknown, default_opt_level
+                    );
+                    default_opt_level
+                }
+            };
+
+            let debug_info: bool = match &getenv_unwrap("DEBUG")[..] {
+                "false" => false,
+                "true" => true,
+                unknown => {
+                    eprintln!("Warning: unknown debug={}; defaulting to `true`.", unknown);
+                    true
+                }
+            };
+
+            match (opt_level, debug_info) {
+                (OptLevel::Debug, _) => "Debug",
+                (OptLevel::Release, false) => "Release",
+                (OptLevel::Release, true) => "RelWithDebInfo",
+                (OptLevel::Size, _) => "MinSizeRel",
+            }
+        }
+    }
+
     /// Creates a new blank set of configuration to build the project specified
     /// at the path `path`.
     pub fn new<P: AsRef<Path>>(path: P) -> Config {
@@ -106,6 +179,7 @@ impl Config {
             generator: None,
             cflags: OsString::new(),
             cxxflags: OsString::new(),
+            asmflags: OsString::new(),
             defines: Vec::new(),
             deps: Vec::new(),
             profile: None,
@@ -121,7 +195,14 @@ impl Config {
             no_build_target: false,
             verbose_cmake: false,
             verbose_make: false,
+            pic: None,
         }
+    }
+
+    /// Sets flag for PIC. Otherwise use cc::Build platform default
+    pub fn pic(&mut self, explicit_flag: bool) -> &mut Config {
+        self.pic = Some(explicit_flag);
+        self
     }
 
     /// Sets the build-tool generator (`-G`) for this compilation.
@@ -143,6 +224,14 @@ impl Config {
     pub fn cxxflag<P: AsRef<OsStr>>(&mut self, flag: P) -> &mut Config {
         self.cxxflags.push(" ");
         self.cxxflags.push(flag.as_ref());
+        self
+    }
+
+    /// Adds a custom flag to pass down to the ASM compiler, supplementing those
+    /// that this library already passes.
+    pub fn asmflag<P: AsRef<OsStr>>(&mut self, flag: P) -> &mut Config {
+        self.asmflags.push(" ");
+        self.asmflags.push(flag.as_ref());
         self
     }
 
@@ -335,8 +424,13 @@ impl Config {
             c_cfg.static_crt(static_crt);
             cxx_cfg.static_crt(static_crt);
         }
+        if let Some(explicit_flag) = self.pic {
+            c_cfg.pic(explicit_flag);
+            cxx_cfg.pic(explicit_flag);
+        }
         let c_compiler = c_cfg.get_compiler();
         let cxx_compiler = cxx_cfg.get_compiler();
+        let asm_compiler = c_cfg.get_compiler();
 
         let dst = self
             .out_dir
@@ -472,69 +566,7 @@ impl Config {
         if let Some(ref generator) = self.generator {
             cmd.arg("-G").arg(generator);
         }
-        let profile = self.profile.clone().unwrap_or_else(|| {
-            // Automatically set the `CMAKE_BUILD_TYPE` if the user did not
-            // specify one.
-
-            // Determine Rust's profile, optimization level, and debug info:
-            #[derive(PartialEq)]
-            enum RustProfile {
-                Debug,
-                Release,
-            }
-            #[derive(PartialEq, Debug)]
-            enum OptLevel {
-                Debug,
-                Release,
-                Size,
-            }
-
-            let rust_profile = match &getenv_unwrap("PROFILE")[..] {
-                "debug" => RustProfile::Debug,
-                "release" | "bench" => RustProfile::Release,
-                unknown => {
-                    eprintln!(
-                        "Warning: unknown Rust profile={}; defaulting to a release build.",
-                        unknown
-                    );
-                    RustProfile::Release
-                }
-            };
-
-            let opt_level = match &getenv_unwrap("OPT_LEVEL")[..] {
-                "0" => OptLevel::Debug,
-                "1" | "2" | "3" => OptLevel::Release,
-                "s" | "z" => OptLevel::Size,
-                unknown => {
-                    let default_opt_level = match rust_profile {
-                        RustProfile::Debug => OptLevel::Debug,
-                        RustProfile::Release => OptLevel::Release,
-                    };
-                    eprintln!(
-                        "Warning: unknown opt-level={}; defaulting to a {:?} build.",
-                        unknown, default_opt_level
-                    );
-                    default_opt_level
-                }
-            };
-
-            let debug_info: bool = match &getenv_unwrap("DEBUG")[..] {
-                "false" => false,
-                "true" => true,
-                unknown => {
-                    eprintln!("Warning: unknown debug={}; defaulting to `true`.", unknown);
-                    true
-                }
-            };
-
-            match (opt_level, debug_info) {
-                (OptLevel::Debug, _) => "Debug",
-                (OptLevel::Release, false) => "Release",
-                (OptLevel::Release, true) => "RelWithDebInfo",
-                (OptLevel::Size, _) => "MinSizeRel",
-            }
-            .to_string()
-        });
+        let profile = self.get_profile();
         for &(ref k, ref v) in &self.defines {
             let mut os = OsString::from("-D");
             os.push(k);
@@ -650,6 +682,7 @@ impl Config {
 
             set_compiler("C", &c_compiler, &self.cflags);
             set_compiler("CXX", &cxx_compiler, &self.cxxflags);
+            set_compiler("ASM", &asm_compiler, &self.asmflags);
         }
 
         if !self.defined("CMAKE_BUILD_TYPE") {

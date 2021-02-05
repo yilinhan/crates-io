@@ -11,7 +11,7 @@ unsafe impl Send for AtomicUsize {}
 unsafe impl Sync for AtomicUsize {}
 
 impl AtomicUsize {
-    pub(crate) fn new(val: usize) -> AtomicUsize {
+    pub(crate) const fn new(val: usize) -> AtomicUsize {
         let inner = UnsafeCell::new(std::sync::atomic::AtomicUsize::new(val));
         AtomicUsize { inner }
     }
@@ -24,6 +24,11 @@ impl AtomicUsize {
     /// Additionally, there must be no concurrent mutations.
     pub(crate) unsafe fn unsync_load(&self) -> usize {
         *(*self.inner.get()).get_mut()
+    }
+
+    pub(crate) fn with_mut<R>(&mut self, f: impl FnOnce(&mut usize) -> R) -> R {
+        // safety: we have mutable access
+        f(unsafe { (*self.inner.get()).get_mut() })
     }
 }
 

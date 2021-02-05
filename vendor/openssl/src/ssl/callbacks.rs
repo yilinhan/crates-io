@@ -28,6 +28,7 @@ use ssl::{
     SniError, Ssl, SslAlert, SslContext, SslContextRef, SslRef, SslSession, SslSessionRef,
     SESSION_CTX_INDEX,
 };
+use util::ForeignTypeRefExt;
 #[cfg(ossl111)]
 use x509::X509Ref;
 use x509::{X509StoreContext, X509StoreContextRef};
@@ -116,10 +117,10 @@ where
             .ssl_context()
             .ex_data(callback_idx)
             .expect("BUG: psk callback missing") as *const F;
-        let identity = if identity != ptr::null() {
-            Some(CStr::from_ptr(identity).to_bytes())
-        } else {
+        let identity = if identity.is_null() {
             None
+        } else {
+            Some(CStr::from_ptr(identity).to_bytes())
         };
         // Give the callback mutable slices into which it can write the psk.
         let psk_sl = slice::from_raw_parts_mut(psk as *mut u8, max_psk_len as usize);
@@ -424,7 +425,7 @@ pub unsafe extern "C" fn raw_keylog<F>(ssl: *const ffi::SSL, line: *const c_char
 where
     F: Fn(&SslRef, &str) + 'static + Sync + Send,
 {
-    let ssl = SslRef::from_ptr(ssl as *mut _);
+    let ssl = SslRef::from_const_ptr(ssl);
     let callback = ssl
         .ssl_context()
         .ex_data(SslContext::cached_ex_index::<F>())

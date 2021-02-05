@@ -1,3 +1,11 @@
+//! [![github]](https://github.com/dtolnay/inventory)&ensp;[![crates-io]](https://crates.io/crates/inventory)&ensp;[![docs-rs]](https://docs.rs/inventory)
+//!
+//! [github]: https://img.shields.io/badge/github-8da0cb?style=for-the-badge&labelColor=555555&logo=github
+//! [crates-io]: https://img.shields.io/badge/crates.io-fc8d62?style=for-the-badge&labelColor=555555&logo=rust
+//! [docs-rs]: https://img.shields.io/badge/docs.rs-66c2a5?style=for-the-badge&labelColor=555555&logoColor=white&logo=data:image/svg+xml;base64,PHN2ZyByb2xlPSJpbWciIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgdmlld0JveD0iMCAwIDUxMiA1MTIiPjxwYXRoIGZpbGw9IiNmNWY1ZjUiIGQ9Ik00ODguNiAyNTAuMkwzOTIgMjE0VjEwNS41YzAtMTUtOS4zLTI4LjQtMjMuNC0zMy43bC0xMDAtMzcuNWMtOC4xLTMuMS0xNy4xLTMuMS0yNS4zIDBsLTEwMCAzNy41Yy0xNC4xIDUuMy0yMy40IDE4LjctMjMuNCAzMy43VjIxNGwtOTYuNiAzNi4yQzkuMyAyNTUuNSAwIDI2OC45IDAgMjgzLjlWMzk0YzAgMTMuNiA3LjcgMjYuMSAxOS45IDMyLjJsMTAwIDUwYzEwLjEgNS4xIDIyLjEgNS4xIDMyLjIgMGwxMDMuOS01MiAxMDMuOSA1MmMxMC4xIDUuMSAyMi4xIDUuMSAzMi4yIDBsMTAwLTUwYzEyLjItNi4xIDE5LjktMTguNiAxOS45LTMyLjJWMjgzLjljMC0xNS05LjMtMjguNC0yMy40LTMzLjd6TTM1OCAyMTQuOGwtODUgMzEuOXYtNjguMmw4NS0zN3Y3My4zek0xNTQgMTA0LjFsMTAyLTM4LjIgMTAyIDM4LjJ2LjZsLTEwMiA0MS40LTEwMi00MS40di0uNnptODQgMjkxLjFsLTg1IDQyLjV2LTc5LjFsODUtMzguOHY3NS40em0wLTExMmwtMTAyIDQxLjQtMTAyLTQxLjR2LS42bDEwMi0zOC4yIDEwMiAzOC4ydi42em0yNDAgMTEybC04NSA0Mi41di03OS4xbDg1LTM4Ljh2NzUuNHptMC0xMTJsLTEwMiA0MS40LTEwMi00MS40di0uNmwxMDItMzguMiAxMDIgMzguMnYuNnoiPjwvcGF0aD48L3N2Zz4K
+//!
+//! <br>
+//!
 //! **Typed distributed plugin registration.**
 //!
 //! This crate provides a way to set up a plugin registry into which plugins
@@ -94,6 +102,7 @@
 //! There is no guarantee about the order that plugins of the same type are
 //! visited by the iterator. They may be visited in any order.
 
+#![doc(html_root_url = "https://docs.rs/inventory/0.1.10")]
 #![cfg_attr(not(inventory_require_std), no_std)]
 
 #[cfg(not(inventory_require_std))]
@@ -109,6 +118,7 @@ pub use ctor::ctor;
 #[doc(hidden)]
 pub use inventory_impl as r#impl;
 
+use core::ops::Deref;
 use core::ptr;
 use core::sync::atomic::{AtomicPtr, Ordering};
 
@@ -165,7 +175,9 @@ impl<T: 'static> Registry<T> {
             // `new` is always a valid Node<T>, and is not yet visible through the registry.
             // `head` is always null or valid &'static Node<T>.
             unsafe { new.as_mut().next = head.as_ref() };
-            let prev = self.head.compare_and_swap(head, new.as_ptr(), Ordering::SeqCst);
+            let prev = self
+                .head
+                .compare_and_swap(head, new.as_ptr(), Ordering::SeqCst);
             if prev == head {
                 return;
             } else {
@@ -221,19 +233,32 @@ pub type iter<T> = private::iter<T>;
 pub use crate::private::*;
 
 const ITER: () = {
+    fn into_iter<T: Collect>() -> Iter<T> {
+        let head = T::registry().head.load(Ordering::SeqCst);
+        Iter {
+            // Head pointer is always null or valid &'static Node<T>.
+            node: unsafe { head.as_ref() },
+        }
+    }
+
     impl<T: Collect> IntoIterator for iter<T> {
         type Item = &'static T;
         type IntoIter = Iter<T>;
 
         fn into_iter(self) -> Self::IntoIter {
-            let head = T::registry().head.load(Ordering::SeqCst);
-            Iter {
-                // Head pointer is always null or valid &'static Node<T>.
-                node: unsafe { head.as_ref() },
-            }
+            into_iter()
         }
     }
 
+    #[doc(hidden)]
+    impl<T: Collect> Deref for iter<T> {
+        type Target = fn() -> Iter<T>;
+        fn deref(&self) -> &Self::Target {
+            &(into_iter as fn() -> Iter<T>)
+        }
+    }
+
+    #[derive(Clone)]
     pub struct Iter<T: 'static> {
         node: Option<&'static Node<T>>,
     }

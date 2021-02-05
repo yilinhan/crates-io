@@ -1,9 +1,9 @@
-use crate::msgs::enums::SignatureScheme;
-use crate::sign;
-use crate::key;
-use webpki;
-use crate::server;
 use crate::error::TLSError;
+use crate::key;
+use crate::server;
+use crate::server::ClientHello;
+use crate::sign;
+use webpki;
 
 use std::collections;
 use std::sync::{Arc, Mutex};
@@ -53,7 +53,8 @@ impl ServerSessionMemoryCache {
 
 impl server::StoresServerSessions for ServerSessionMemoryCache {
     fn put(&self, key: Vec<u8>, value: Vec<u8>) -> bool {
-        self.cache.lock()
+        self.cache
+            .lock()
             .unwrap()
             .insert(key, value);
         self.limit_size();
@@ -61,15 +62,15 @@ impl server::StoresServerSessions for ServerSessionMemoryCache {
     }
 
     fn get(&self, key: &[u8]) -> Option<Vec<u8>> {
-        self.cache.lock()
+        self.cache
+            .lock()
             .unwrap()
-            .get(key).cloned()
+            .get(key)
+            .cloned()
     }
 
     fn take(&self, key: &[u8]) -> Option<Vec<u8>> {
-        self.cache.lock()
-            .unwrap()
-            .remove(key)
+        self.cache.lock().unwrap().remove(key)
     }
 }
 
@@ -95,10 +96,7 @@ impl server::ProducesTickets for NeverProducesTickets {
 pub struct FailResolveChain {}
 
 impl server::ResolvesServerCert for FailResolveChain {
-    fn resolve(&self,
-               _server_name: Option<webpki::DNSNameRef>,
-               _sigschemes: &[SignatureScheme])
-               -> Option<sign::CertifiedKey> {
+    fn resolve(&self, _client_hello: ClientHello) -> Option<sign::CertifiedKey> {
         None
     }
 }
@@ -109,21 +107,28 @@ pub struct AlwaysResolvesChain(sign::CertifiedKey);
 impl AlwaysResolvesChain {
     /// Creates an `AlwaysResolvesChain`, auto-detecting the underlying private
     /// key type and encoding.
-    pub fn new(chain: Vec<key::Certificate>,
-               priv_key: &key::PrivateKey) -> Result<AlwaysResolvesChain, TLSError> {
+    pub fn new(
+        chain: Vec<key::Certificate>,
+        priv_key: &key::PrivateKey,
+    ) -> Result<AlwaysResolvesChain, TLSError> {
         let key = sign::any_supported_type(priv_key)
             .map_err(|_| TLSError::General("invalid private key".into()))?;
-        Ok(AlwaysResolvesChain(sign::CertifiedKey::new(chain, Arc::new(key))))
+        Ok(AlwaysResolvesChain(sign::CertifiedKey::new(
+            chain,
+            Arc::new(key),
+        )))
     }
 
     /// Creates an `AlwaysResolvesChain`, auto-detecting the underlying private
     /// key type and encoding.
     ///
     /// If non-empty, the given OCSP response and SCTs are attached.
-    pub fn new_with_extras(chain: Vec<key::Certificate>,
-                           priv_key: &key::PrivateKey,
-                           ocsp: Vec<u8>,
-                           scts: Vec<u8>) -> Result<AlwaysResolvesChain, TLSError> {
+    pub fn new_with_extras(
+        chain: Vec<key::Certificate>,
+        priv_key: &key::PrivateKey,
+        ocsp: Vec<u8>,
+        scts: Vec<u8>,
+    ) -> Result<AlwaysResolvesChain, TLSError> {
         let mut r = AlwaysResolvesChain::new(chain, priv_key)?;
         if !ocsp.is_empty() {
             r.0.ocsp = Some(ocsp);
@@ -136,10 +141,7 @@ impl AlwaysResolvesChain {
 }
 
 impl server::ResolvesServerCert for AlwaysResolvesChain {
-    fn resolve(&self,
-               _server_name: Option<webpki::DNSNameRef>,
-               _sigschemes: &[SignatureScheme])
-               -> Option<sign::CertifiedKey> {
+    fn resolve(&self, _client_hello: ClientHello) -> Option<sign::CertifiedKey> {
         Some(self.0.clone())
     }
 }
@@ -153,7 +155,9 @@ pub struct ResolvesServerCertUsingSNI {
 impl ResolvesServerCertUsingSNI {
     /// Create a new and empty (ie, knows no certificates) resolver.
     pub fn new() -> ResolvesServerCertUsingSNI {
-        ResolvesServerCertUsingSNI { by_name: collections::HashMap::new() }
+        ResolvesServerCertUsingSNI {
+            by_name: collections::HashMap::new(),
+        }
     }
 
     /// Add a new `sign::CertifiedKey` to be used for the given SNI `name`.
@@ -172,13 +176,9 @@ impl ResolvesServerCertUsingSNI {
 }
 
 impl server::ResolvesServerCert for ResolvesServerCertUsingSNI {
-    fn resolve(&self,
-               server_name: Option<webpki::DNSNameRef>,
-               _sigschemes: &[SignatureScheme])
-               -> Option<sign::CertifiedKey> {
-        if let Some(name) = server_name {
-            self.by_name.get(name.into())
-                .cloned()
+    fn resolve(&self, client_hello: ClientHello) -> Option<sign::CertifiedKey> {
+        if let Some(name) = client_hello.server_name() {
+            self.by_name.get(name.into()).cloned()
         } else {
             // This kind of resolver requires SNI
             None
@@ -189,6 +189,8 @@ impl server::ResolvesServerCert for ResolvesServerCertUsingSNI {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::server::ProducesTickets;
+    use crate::server::ResolvesServerCert;
     use crate::StoresServerSessions;
 
     #[test]
@@ -204,6 +206,14 @@ mod test {
         assert_eq!(c.get(&[]), None);
         assert_eq!(c.get(&[0x01]), None);
         assert_eq!(c.get(&[0x02]), None);
+    }
+
+    #[test]
+    fn test_noserversessionstorage_denies_takes() {
+        let c = NoServerSessionStorage {};
+        assert_eq!(c.take(&[]), None);
+        assert_eq!(c.take(&[0x01]), None);
+        assert_eq!(c.take(&[0x02]), None);
     }
 
     #[test]
@@ -238,12 +248,61 @@ mod test {
         assert_eq!(c.put(vec![0x09], vec![0x0a]), true);
 
         let mut count = 0;
-        if c.get(&[0x01]).is_some() { count += 1; }
-        if c.get(&[0x03]).is_some() { count += 1; }
-        if c.get(&[0x05]).is_some() { count += 1; }
-        if c.get(&[0x07]).is_some() { count += 1; }
-        if c.get(&[0x09]).is_some() { count += 1; }
+        if c.get(&[0x01]).is_some() {
+            count += 1;
+        }
+        if c.get(&[0x03]).is_some() {
+            count += 1;
+        }
+        if c.get(&[0x05]).is_some() {
+            count += 1;
+        }
+        if c.get(&[0x07]).is_some() {
+            count += 1;
+        }
+        if c.get(&[0x09]).is_some() {
+            count += 1;
+        }
 
         assert_eq!(count, 4);
+    }
+
+    #[test]
+    fn test_neverproducestickets_does_nothing() {
+        let npt = NeverProducesTickets {};
+        assert_eq!(false, npt.enabled());
+        assert_eq!(0, npt.get_lifetime());
+        assert_eq!(None, npt.encrypt(&[]));
+        assert_eq!(None, npt.decrypt(&[]));
+    }
+
+    #[test]
+    fn test_failresolvechain_does_nothing() {
+        let frc = FailResolveChain {};
+        assert!(
+            frc.resolve(ClientHello::new(None, &[], None))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_resolvesservercertusingsni_requires_sni() {
+        let rscsni = ResolvesServerCertUsingSNI::new();
+        assert!(
+            rscsni
+                .resolve(ClientHello::new(None, &[], None))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_resolvesservercertusingsni_handles_unknown_name() {
+        let rscsni = ResolvesServerCertUsingSNI::new();
+        let name = webpki::DNSNameRef::try_from_ascii_str("hello.com").unwrap();
+        assert!(
+            rscsni
+                .resolve(ClientHello::new(Some(name), &[], None))
+                .is_none()
+        );
     }
 }

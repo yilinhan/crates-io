@@ -1,22 +1,22 @@
 #![warn(rust_2018_idioms)]
 #![cfg(feature = "full")]
 
-use std::{
-    cell::Cell,
-    sync::atomic::{
-        AtomicBool, AtomicUsize,
-        Ordering::{self, SeqCst},
-    },
-    time::Duration,
-};
-use tokio::{
-    runtime::{self, Runtime},
-    sync::{mpsc, oneshot},
-    task::{self, LocalSet},
-    time,
+use futures::{
+    future::{pending, ready},
+    FutureExt,
 };
 
-#[tokio::test(basic_scheduler)]
+use tokio::runtime::{self, Runtime};
+use tokio::sync::{mpsc, oneshot};
+use tokio::task::{self, LocalSet};
+use tokio::time;
+
+use std::cell::Cell;
+use std::sync::atomic::Ordering::{self, SeqCst};
+use std::sync::atomic::{AtomicBool, AtomicUsize};
+use std::time::Duration;
+
+#[tokio::test(flavor = "current_thread")]
 async fn local_basic_scheduler() {
     LocalSet::new()
         .run_until(async {
@@ -25,7 +25,7 @@ async fn local_basic_scheduler() {
         .await;
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn local_threadpool() {
     thread_local! {
         static ON_RT_THREAD: Cell<bool> = Cell::new(false);
@@ -45,7 +45,7 @@ async fn local_threadpool() {
         .await;
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn localset_future_threadpool() {
     thread_local! {
         static ON_LOCAL_THREAD: Cell<bool> = Cell::new(false);
@@ -60,18 +60,18 @@ async fn localset_future_threadpool() {
     local.await;
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn localset_future_timers() {
     static RAN1: AtomicBool = AtomicBool::new(false);
     static RAN2: AtomicBool = AtomicBool::new(false);
 
     let local = LocalSet::new();
     local.spawn_local(async move {
-        time::delay_for(Duration::from_millis(10)).await;
+        time::sleep(Duration::from_millis(10)).await;
         RAN1.store(true, Ordering::SeqCst);
     });
     local.spawn_local(async move {
-        time::delay_for(Duration::from_millis(20)).await;
+        time::sleep(Duration::from_millis(20)).await;
         RAN2.store(true, Ordering::SeqCst);
     });
     local.await;
@@ -104,7 +104,7 @@ async fn localset_future_drives_all_local_futs() {
     assert!(RAN3.load(Ordering::SeqCst));
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn local_threadpool_timer() {
     // This test ensures that runtime services like the timer are properly
     // set for the local task set.
@@ -119,7 +119,7 @@ async fn local_threadpool_timer() {
             assert!(ON_RT_THREAD.with(|cell| cell.get()));
             let join = task::spawn_local(async move {
                 assert!(ON_RT_THREAD.with(|cell| cell.get()));
-                time::delay_for(Duration::from_millis(10)).await;
+                time::sleep(Duration::from_millis(10)).await;
                 assert!(ON_RT_THREAD.with(|cell| cell.get()));
             });
             join.await.unwrap();
@@ -138,12 +138,11 @@ fn local_threadpool_blocking_in_place() {
 
     ON_RT_THREAD.with(|cell| cell.set(true));
 
-    let mut rt = runtime::Builder::new()
-        .threaded_scheduler()
+    let rt = runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap();
-    LocalSet::new().block_on(&mut rt, async {
+    LocalSet::new().block_on(&rt, async {
         assert!(ON_RT_THREAD.with(|cell| cell.get()));
         let join = task::spawn_local(async move {
             assert!(ON_RT_THREAD.with(|cell| cell.get()));
@@ -154,7 +153,7 @@ fn local_threadpool_blocking_in_place() {
     });
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn local_threadpool_blocking_run() {
     thread_local! {
         static ON_RT_THREAD: Cell<bool> = Cell::new(false);
@@ -182,7 +181,7 @@ async fn local_threadpool_blocking_run() {
         .await;
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn all_spawns_are_local() {
     use futures::future;
     thread_local! {
@@ -208,7 +207,7 @@ async fn all_spawns_are_local() {
         .await;
 }
 
-#[tokio::test(threaded_scheduler)]
+#[tokio::test(flavor = "multi_thread")]
 async fn nested_spawn_is_local() {
     thread_local! {
         static ON_RT_THREAD: Cell<bool> = Cell::new(false);
@@ -251,12 +250,9 @@ fn join_local_future_elsewhere() {
 
     ON_RT_THREAD.with(|cell| cell.set(true));
 
-    let mut rt = runtime::Builder::new()
-        .threaded_scheduler()
-        .build()
-        .unwrap();
+    let rt = runtime::Runtime::new().unwrap();
     let local = LocalSet::new();
-    local.block_on(&mut rt, async move {
+    local.block_on(&rt, async move {
         let (tx, rx) = oneshot::channel();
         let join = task::spawn_local(async move {
             println!("hello world running...");
@@ -285,50 +281,49 @@ fn join_local_future_elsewhere() {
         join2.await.unwrap()
     });
 }
+
 #[test]
 fn drop_cancels_tasks() {
+    use std::rc::Rc;
+
     // This test reproduces issue #1842
-    let mut rt = rt();
+    let rt = rt();
+    let rc1 = Rc::new(());
+    let rc2 = rc1.clone();
 
     let (started_tx, started_rx) = oneshot::channel();
 
     let local = LocalSet::new();
     local.spawn_local(async move {
+        // Move this in
+        let _rc2 = rc2;
+
         started_tx.send(()).unwrap();
         loop {
-            time::delay_for(Duration::from_secs(3600)).await;
+            time::sleep(Duration::from_secs(3600)).await;
         }
     });
 
-    local.block_on(&mut rt, async {
+    local.block_on(&rt, async {
         started_rx.await.unwrap();
     });
     drop(local);
     drop(rt);
+
+    assert_eq!(1, Rc::strong_count(&rc1));
 }
 
-#[test]
-fn drop_cancels_remote_tasks() {
-    // This test reproduces issue #1885.
+/// Runs a test function in a separate thread, and panics if the test does not
+/// complete within the specified timeout, or if the test function panics.
+///
+/// This is intended for running tests whose failure mode is a hang or infinite
+/// loop that cannot be detected otherwise.
+fn with_timeout(timeout: Duration, f: impl FnOnce() + Send + 'static) {
     use std::sync::mpsc::RecvTimeoutError;
 
     let (done_tx, done_rx) = std::sync::mpsc::channel();
     let thread = std::thread::spawn(move || {
-        let (tx, mut rx) = mpsc::channel::<()>(1024);
-
-        let mut rt = rt();
-
-        let local = LocalSet::new();
-        local.spawn_local(async move { while let Some(_) = rx.recv().await {} });
-        local.block_on(&mut rt, async {
-            time::delay_for(Duration::from_millis(1)).await;
-        });
-
-        drop(tx);
-
-        // This enters an infinite loop if the remote notified tasks are not
-        // properly cancelled.
-        drop(local);
+        f();
 
         // Send a message on the channel so that the test thread can
         // determine if we have entered an infinite loop:
@@ -344,10 +339,11 @@ fn drop_cancels_remote_tasks() {
     //
     // Note that it should definitely complete in under a minute, but just
     // in case CI is slow, we'll give it a long timeout.
-    match done_rx.recv_timeout(Duration::from_secs(60)) {
+    match done_rx.recv_timeout(timeout) {
         Err(RecvTimeoutError::Timeout) => panic!(
-            "test did not complete within 60 seconds, \
-             we have (probably) entered an infinite loop!"
+            "test did not complete within {:?} seconds, \
+             we have (probably) entered an infinite loop!",
+            timeout,
         ),
         // Did the test thread panic? We'll find out for sure when we `join`
         // with it.
@@ -359,6 +355,49 @@ fn drop_cancels_remote_tasks() {
     }
 
     thread.join().expect("test thread should not panic!")
+}
+
+#[test]
+fn drop_cancels_remote_tasks() {
+    // This test reproduces issue #1885.
+    with_timeout(Duration::from_secs(60), || {
+        let (tx, mut rx) = mpsc::channel::<()>(1024);
+
+        let rt = rt();
+
+        let local = LocalSet::new();
+        local.spawn_local(async move { while rx.recv().await.is_some() {} });
+        local.block_on(&rt, async {
+            time::sleep(Duration::from_millis(1)).await;
+        });
+
+        drop(tx);
+
+        // This enters an infinite loop if the remote notified tasks are not
+        // properly cancelled.
+        drop(local);
+    });
+}
+
+#[test]
+fn local_tasks_wake_join_all() {
+    // This test reproduces issue #2460.
+    with_timeout(Duration::from_secs(60), || {
+        use futures::future::join_all;
+        use tokio::task::LocalSet;
+
+        let rt = rt();
+        let set = LocalSet::new();
+        let mut handles = Vec::new();
+
+        for _ in 1..=128 {
+            handles.push(set.spawn_local(async move {
+                tokio::task::spawn_local(async move {}).await.unwrap();
+            }));
+        }
+
+        rt.block_on(set.run_until(join_all(handles)));
+    });
 }
 
 #[tokio::test]
@@ -377,7 +416,7 @@ async fn local_tasks_are_polled_after_tick() {
         .run_until(async {
             let task2 = task::spawn(async move {
                 // Wait a bit
-                time::delay_for(Duration::from_millis(100)).await;
+                time::sleep(Duration::from_millis(100)).await;
 
                 let mut oneshots = Vec::with_capacity(EXPECTED);
 
@@ -388,13 +427,13 @@ async fn local_tasks_are_polled_after_tick() {
                     tx.send(oneshot_rx).unwrap();
                 }
 
-                time::delay_for(Duration::from_millis(100)).await;
+                time::sleep(Duration::from_millis(100)).await;
 
                 for tx in oneshots.drain(..) {
                     tx.send(()).unwrap();
                 }
 
-                time::delay_for(Duration::from_millis(300)).await;
+                time::sleep(Duration::from_millis(300)).await;
                 let rx1 = RX1.load(SeqCst);
                 let rx2 = RX2.load(SeqCst);
                 println!("EXPECT = {}; RX1 = {}; RX2 = {}", EXPECTED, rx1, rx2);
@@ -452,9 +491,17 @@ async fn acquire_mutex_in_drop() {
     drop(local);
 }
 
+#[tokio::test]
+async fn spawn_wakes_localset() {
+    let local = LocalSet::new();
+    futures::select! {
+        _ = local.run_until(pending::<()>()).fuse() => unreachable!(),
+        ret = async { local.spawn_local(ready(())).await.unwrap()}.fuse() => ret
+    }
+}
+
 fn rt() -> Runtime {
-    tokio::runtime::Builder::new()
-        .basic_scheduler()
+    tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()
         .unwrap()

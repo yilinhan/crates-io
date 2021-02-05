@@ -7,6 +7,7 @@ use tokio::runtime::{self, Runtime};
 use tokio::sync::oneshot;
 use tokio_test::{assert_err, assert_ok};
 
+use futures::future::poll_fn;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::AtomicUsize;
@@ -17,10 +18,9 @@ use std::task::{Context, Poll};
 #[test]
 fn single_thread() {
     // No panic when starting a runtime w/ a single thread
-    let _ = runtime::Builder::new()
-        .threaded_scheduler()
+    let _ = runtime::Builder::new_multi_thread()
         .enable_all()
-        .core_threads(1)
+        .worker_threads(1)
         .build();
 }
 
@@ -56,22 +56,20 @@ fn many_oneshot_futures() {
 }
 #[test]
 fn many_multishot_futures() {
-    use tokio::sync::mpsc;
-
     const CHAIN: usize = 200;
     const CYCLES: usize = 5;
     const TRACKS: usize = 50;
 
     for _ in 0..50 {
-        let mut rt = rt();
+        let rt = rt();
         let mut start_txs = Vec::with_capacity(TRACKS);
         let mut final_rxs = Vec::with_capacity(TRACKS);
 
         for _ in 0..TRACKS {
-            let (start_tx, mut chain_rx) = mpsc::channel(10);
+            let (start_tx, mut chain_rx) = tokio::sync::mpsc::channel(10);
 
             for _ in 0..CHAIN {
-                let (mut next_tx, next_rx) = mpsc::channel(10);
+                let (next_tx, next_rx) = tokio::sync::mpsc::channel(10);
 
                 // Forward all the messages
                 rt.spawn(async move {
@@ -84,8 +82,8 @@ fn many_multishot_futures() {
             }
 
             // This final task cycles if needed
-            let (mut final_tx, final_rx) = mpsc::channel(10);
-            let mut cycle_tx = start_tx.clone();
+            let (final_tx, final_rx) = tokio::sync::mpsc::channel(10);
+            let cycle_tx = start_tx.clone();
             let mut rem = CYCLES;
 
             rt.spawn(async move {
@@ -108,7 +106,7 @@ fn many_multishot_futures() {
 
         {
             rt.block_on(async move {
-                for mut start_tx in start_txs {
+                for start_tx in start_txs {
                     start_tx.send("ping").await.unwrap();
                 }
 
@@ -122,7 +120,7 @@ fn many_multishot_futures() {
 
 #[test]
 fn spawn_shutdown() {
-    let mut rt = rt();
+    let rt = rt();
     let (tx, rx) = mpsc::channel();
 
     rt.block_on(async {
@@ -140,7 +138,7 @@ fn spawn_shutdown() {
 }
 
 async fn client_server(tx: mpsc::Sender<()>) {
-    let mut server = assert_ok!(TcpListener::bind("127.0.0.1:0").await);
+    let server = assert_ok!(TcpListener::bind("127.0.0.1:0").await);
 
     // Get the assigned address
     let addr = assert_ok!(server.local_addr());
@@ -189,8 +187,7 @@ fn drop_threadpool_drops_futures() {
         let a = num_inc.clone();
         let b = num_dec.clone();
 
-        let rt = runtime::Builder::new()
-            .threaded_scheduler()
+        let rt = runtime::Builder::new_multi_thread()
             .enable_all()
             .on_thread_start(move || {
                 a.fetch_add(1, Relaxed);
@@ -229,8 +226,7 @@ fn start_stop_callbacks_called() {
 
     let after_inner = after_start.clone();
     let before_inner = before_stop.clone();
-    let mut rt = tokio::runtime::Builder::new()
-        .threaded_scheduler()
+    let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .on_thread_start(move || {
             after_inner.clone().fetch_add(1, Ordering::Relaxed);
@@ -320,6 +316,93 @@ fn multi_threadpool() {
     });
 
     done_rx.recv().unwrap();
+}
+
+// When `block_in_place` returns, it attempts to reclaim the yielded runtime
+// worker. In this case, the remainder of the task is on the runtime worker and
+// must take part in the cooperative task budgeting system.
+//
+// The test ensures that, when this happens, attempting to consume from a
+// channel yields occasionally even if there are values ready to receive.
+#[test]
+fn coop_and_block_in_place() {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        // Setting max threads to 1 prevents another thread from claiming the
+        // runtime worker yielded as part of `block_in_place` and guarantees the
+        // same thread will reclaim the worker at the end of the
+        // `block_in_place` call.
+        .max_blocking_threads(1)
+        .build()
+        .unwrap();
+
+    rt.block_on(async move {
+        let (tx, mut rx) = tokio::sync::mpsc::channel(1024);
+
+        // Fill the channel
+        for _ in 0..1024 {
+            tx.send(()).await.unwrap();
+        }
+
+        drop(tx);
+
+        tokio::spawn(async move {
+            // Block in place without doing anything
+            tokio::task::block_in_place(|| {});
+
+            // Receive all the values, this should trigger a `Pending` as the
+            // coop limit will be reached.
+            poll_fn(|cx| {
+                while let Poll::Ready(v) = {
+                    tokio::pin! {
+                        let fut = rx.recv();
+                    }
+
+                    Pin::new(&mut fut).poll(cx)
+                } {
+                    if v.is_none() {
+                        panic!("did not yield");
+                    }
+                }
+
+                Poll::Ready(())
+            })
+            .await
+        })
+        .await
+        .unwrap();
+    });
+}
+
+// Testing this does not panic
+#[test]
+fn max_blocking_threads() {
+    let _rt = tokio::runtime::Builder::new_multi_thread()
+        .max_blocking_threads(1)
+        .build()
+        .unwrap();
+}
+
+#[test]
+#[should_panic]
+fn max_blocking_threads_set_to_zero() {
+    let _rt = tokio::runtime::Builder::new_multi_thread()
+        .max_blocking_threads(0)
+        .build()
+        .unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn hang_on_shutdown() {
+    let (sync_tx, sync_rx) = std::sync::mpsc::channel::<()>();
+    tokio::spawn(async move {
+        tokio::task::block_in_place(|| sync_rx.recv().ok());
+    });
+
+    tokio::spawn(async {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        drop(sync_tx);
+    });
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
 }
 
 fn rt() -> Runtime {

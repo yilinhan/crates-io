@@ -6,18 +6,24 @@ use http::header::{
 };
 use http::HeaderMap;
 use pin_project::pin_project;
+use std::error::Error as StdError;
+use std::io::IoSlice;
 
-use super::DecodedLength;
-use crate::body::Payload;
+use crate::body::{DecodedLength, HttpBody};
 use crate::common::{task, Future, Pin, Poll};
 use crate::headers::content_length_parse_all;
 
-pub(crate) mod bdp;
-pub(crate) mod client;
-pub(crate) mod server;
+pub(crate) mod ping;
 
-pub(crate) use self::client::ClientTask;
-pub(crate) use self::server::Server;
+cfg_client! {
+    pub(crate) mod client;
+    pub(crate) use self::client::ClientTask;
+}
+
+cfg_server! {
+    pub(crate) mod server;
+    pub(crate) use self::server::Server;
+}
 
 /// Default initial stream window size defined in HTTP2 spec.
 pub(crate) const SPEC_WINDOW_SIZE: u32 = 65_535;
@@ -91,7 +97,7 @@ fn decode_content_length(headers: &HeaderMap) -> DecodedLength {
 #[pin_project]
 struct PipeToSendStream<S>
 where
-    S: Payload,
+    S: HttpBody,
 {
     body_tx: SendStream<SendBuf<S::Data>>,
     data_done: bool,
@@ -101,7 +107,7 @@ where
 
 impl<S> PipeToSendStream<S>
 where
-    S: Payload,
+    S: HttpBody,
 {
     fn new(stream: S, tx: SendStream<SendBuf<S::Data>>) -> PipeToSendStream<S> {
         PipeToSendStream {
@@ -114,7 +120,8 @@ where
 
 impl<S> Future for PipeToSendStream<S>
 where
-    S: Payload,
+    S: HttpBody,
+    S::Error: Into<Box<dyn StdError + Send + Sync>>,
 {
     type Output = crate::Result<()>;
 
@@ -250,8 +257,8 @@ impl<B: Buf> Buf for SendBuf<B> {
     }
 
     #[inline]
-    fn bytes(&self) -> &[u8] {
-        self.0.as_ref().map(|b| b.bytes()).unwrap_or(&[])
+    fn chunk(&self) -> &[u8] {
+        self.0.as_ref().map(|b| b.chunk()).unwrap_or(&[])
     }
 
     #[inline]
@@ -259,5 +266,9 @@ impl<B: Buf> Buf for SendBuf<B> {
         if let Some(b) = self.0.as_mut() {
             b.advance(cnt)
         }
+    }
+
+    fn chunks_vectored<'a>(&'a self, dst: &mut [IoSlice<'a>]) -> usize {
+        self.0.as_ref().map(|b| b.chunks_vectored(dst)).unwrap_or(0)
     }
 }

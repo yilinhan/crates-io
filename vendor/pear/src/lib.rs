@@ -1,25 +1,14 @@
-#![feature(core_intrinsics)]
-#![feature(proc_macro_hygiene)]
-#![feature(specialization)]
+#![warn(rust_2018_idioms)]
 
-#[allow(unused_imports)] #[macro_use] extern crate pear_codegen;
-#[doc(hidden)] pub use pear_codegen::*;
+#[doc(hidden)] pub use inlinable_string;
 
-#[macro_use] mod macros;
-mod input;
-mod result;
-mod debug;
-
-#[macro_use] pub mod combinators;
+#[macro_use] pub mod macros;
+pub mod input;
+pub mod result;
+pub mod error;
 pub mod parsers;
+pub mod combinators;
 
-pub use input::*;
-pub use result::*;
-pub use debug::{parser_entry, parser_exit};
+mod expected;
 
-// TODO:
-//  1) Figure out how to make maybe! macro work.
-//      - I think this is a rustc bug. Something with name resolution.
-//  2) Figure out how to pass `input` to macros, if at all.
-//      - Perhaps only pass when macro name starts with `pear_`.
-//  3) Pass parser name into `pear_error`.
+#[doc(hidden)] pub mod debug;

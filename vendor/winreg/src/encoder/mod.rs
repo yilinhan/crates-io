@@ -46,16 +46,7 @@ impl fmt::Display for EncoderError {
     }
 }
 
-impl Error for EncoderError {
-    fn description(&self) -> &str {
-        use self::EncoderError::*;
-        match *self {
-            EncodeNotImplemented(ref s) | SerializerError(ref s) => s,
-            IoError(ref e) => e.description(),
-            NoFieldName => "No field name",
-        }
-    }
-}
+impl Error for EncoderError {}
 
 pub type EncodeResult<T> = Result<T, EncoderError>;
 
@@ -83,7 +74,7 @@ const ENCODER_SAM: DWORD = KEY_CREATE_SUB_KEY | KEY_SET_VALUE;
 
 impl Encoder {
     pub fn from_key(key: &RegKey) -> EncodeResult<Encoder> {
-        let tr = try!(Transaction::new());
+        let tr = Transaction::new()?;
         key.open_subkey_transacted_with_flags("", &tr, ENCODER_SAM)
             .map(|k| Encoder::new(k, tr))
             .map_err(EncoderError::IoError)
@@ -93,8 +84,8 @@ impl Encoder {
         let mut keys = Vec::with_capacity(5);
         keys.push(key);
         Encoder {
-            keys: keys,
-            tr: tr,
+            keys,
+            tr,
             state: Start,
         }
     }

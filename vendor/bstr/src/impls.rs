@@ -314,13 +314,59 @@ mod bstr {
     impl fmt::Display for BStr {
         #[inline]
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-            for chunk in self.utf8_chunks() {
-                f.write_str(chunk.valid())?;
-                if !chunk.invalid().is_empty() {
-                    f.write_str("\u{FFFD}")?;
+            /// Write the given bstr (lossily) to the given formatter.
+            fn write_bstr(
+                f: &mut fmt::Formatter,
+                bstr: &BStr,
+            ) -> Result<(), fmt::Error> {
+                for chunk in bstr.utf8_chunks() {
+                    f.write_str(chunk.valid())?;
+                    if !chunk.invalid().is_empty() {
+                        f.write_str("\u{FFFD}")?;
+                    }
                 }
+                Ok(())
             }
-            Ok(())
+
+            /// Write 'num' fill characters to the given formatter.
+            fn write_pads(f: &mut fmt::Formatter, num: usize) -> fmt::Result {
+                let fill = f.fill();
+                for _ in 0..num {
+                    f.write_fmt(format_args!("{}", fill))?;
+                }
+                Ok(())
+            }
+
+            if let Some(align) = f.align() {
+                let width = f.width().unwrap_or(0);
+                let nchars = self.chars().count();
+                let remaining_pads = width.saturating_sub(nchars);
+                match align {
+                    fmt::Alignment::Left => {
+                        write_bstr(f, self)?;
+                        write_pads(f, remaining_pads)?;
+                    }
+                    fmt::Alignment::Right => {
+                        write_pads(f, remaining_pads)?;
+                        write_bstr(f, self)?;
+                    }
+                    fmt::Alignment::Center => {
+                        let half = remaining_pads / 2;
+                        let second_half = if remaining_pads % 2 == 0 {
+                            half
+                        } else {
+                            half + 1
+                        };
+                        write_pads(f, half)?;
+                        write_bstr(f, self)?;
+                        write_pads(f, second_half)?;
+                    }
+                }
+                Ok(())
+            } else {
+                write_bstr(f, self)?;
+                Ok(())
+            }
         }
     }
 
@@ -329,12 +375,29 @@ mod bstr {
         fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
             write!(f, "\"")?;
             for (s, e, ch) in self.char_indices() {
-                if ch == '\u{FFFD}' {
-                    for &b in self[s..e].as_bytes() {
-                        write!(f, r"\x{:X}", b)?;
+                match ch {
+                    '\0' => write!(f, "\\0")?,
+                    '\u{FFFD}' => {
+                        let bytes = self[s..e].as_bytes();
+                        if bytes == b"\xEF\xBF\xBD" {
+                            write!(f, "{}", ch.escape_debug())?;
+                        } else {
+                            for &b in self[s..e].as_bytes() {
+                                write!(f, r"\x{:02X}", b)?;
+                            }
+                        }
                     }
-                } else {
-                    write!(f, "{}", ch.escape_debug())?;
+                    // ASCII control characters except \0, \n, \r, \t
+                    '\x01'..='\x08'
+                    | '\x0b'
+                    | '\x0c'
+                    | '\x0e'..='\x19'
+                    | '\x7f' => {
+                        write!(f, "\\x{:02x}", ch as u32)?;
+                    }
+                    '\n' | '\r' | '\t' | _ => {
+                        write!(f, "{}", ch.escape_debug())?;
+                    }
                 }
             }
             write!(f, "\"")?;
@@ -536,6 +599,22 @@ mod bstr {
         #[inline]
         fn from(s: &'a BStr) -> Cow<'a, BStr> {
             Cow::Borrowed(s)
+        }
+    }
+
+    #[cfg(feature = "std")]
+    impl From<Box<[u8]>> for Box<BStr> {
+        #[inline]
+        fn from(s: Box<[u8]>) -> Box<BStr> {
+            BStr::from_boxed_bytes(s)
+        }
+    }
+
+    #[cfg(feature = "std")]
+    impl From<Box<BStr>> for Box<[u8]> {
+        #[inline]
+        fn from(s: Box<BStr>) -> Box<[u8]> {
+            BStr::into_boxed_bytes(s)
         }
     }
 
@@ -744,6 +823,115 @@ mod bstring_serde {
 }
 
 #[cfg(test)]
+mod display {
+    use crate::ByteSlice;
+    use bstring::BString;
+
+    #[test]
+    fn clean() {
+        assert_eq!(&format!("{}", &b"abc".as_bstr()), "abc");
+        assert_eq!(&format!("{}", &b"\xf0\x28\x8c\xbc".as_bstr()), "�(��");
+    }
+
+    #[test]
+    fn width_bigger_than_bstr() {
+        assert_eq!(&format!("{:<7}!", &b"abc".as_bstr()), "abc    !");
+        assert_eq!(&format!("{:>7}!", &b"abc".as_bstr()), "    abc!");
+        assert_eq!(&format!("{:^7}!", &b"abc".as_bstr()), "  abc  !");
+        assert_eq!(&format!("{:^6}!", &b"abc".as_bstr()), " abc  !");
+        assert_eq!(&format!("{:-<7}!", &b"abc".as_bstr()), "abc----!");
+        assert_eq!(&format!("{:->7}!", &b"abc".as_bstr()), "----abc!");
+        assert_eq!(&format!("{:-^7}!", &b"abc".as_bstr()), "--abc--!");
+        assert_eq!(&format!("{:-^6}!", &b"abc".as_bstr()), "-abc--!");
+
+        assert_eq!(
+            &format!("{:<7}!", &b"\xf0\x28\x8c\xbc".as_bstr()),
+            "�(��   !"
+        );
+        assert_eq!(
+            &format!("{:>7}!", &b"\xf0\x28\x8c\xbc".as_bstr()),
+            "   �(��!"
+        );
+        assert_eq!(
+            &format!("{:^7}!", &b"\xf0\x28\x8c\xbc".as_bstr()),
+            " �(��  !"
+        );
+        assert_eq!(
+            &format!("{:^6}!", &b"\xf0\x28\x8c\xbc".as_bstr()),
+            " �(�� !"
+        );
+
+        assert_eq!(
+            &format!("{:-<7}!", &b"\xf0\x28\x8c\xbc".as_bstr()),
+            "�(��---!"
+        );
+        assert_eq!(
+            &format!("{:->7}!", &b"\xf0\x28\x8c\xbc".as_bstr()),
+            "---�(��!"
+        );
+        assert_eq!(
+            &format!("{:-^7}!", &b"\xf0\x28\x8c\xbc".as_bstr()),
+            "-�(��--!"
+        );
+        assert_eq!(
+            &format!("{:-^6}!", &b"\xf0\x28\x8c\xbc".as_bstr()),
+            "-�(��-!"
+        );
+    }
+
+    #[test]
+    fn width_lesser_than_bstr() {
+        assert_eq!(&format!("{:<2}!", &b"abc".as_bstr()), "abc!");
+        assert_eq!(&format!("{:>2}!", &b"abc".as_bstr()), "abc!");
+        assert_eq!(&format!("{:^2}!", &b"abc".as_bstr()), "abc!");
+        assert_eq!(&format!("{:-<2}!", &b"abc".as_bstr()), "abc!");
+        assert_eq!(&format!("{:->2}!", &b"abc".as_bstr()), "abc!");
+        assert_eq!(&format!("{:-^2}!", &b"abc".as_bstr()), "abc!");
+
+        assert_eq!(
+            &format!("{:<3}!", &b"\xf0\x28\x8c\xbc".as_bstr()),
+            "�(��!"
+        );
+        assert_eq!(
+            &format!("{:>3}!", &b"\xf0\x28\x8c\xbc".as_bstr()),
+            "�(��!"
+        );
+        assert_eq!(
+            &format!("{:^3}!", &b"\xf0\x28\x8c\xbc".as_bstr()),
+            "�(��!"
+        );
+        assert_eq!(
+            &format!("{:^2}!", &b"\xf0\x28\x8c\xbc".as_bstr()),
+            "�(��!"
+        );
+
+        assert_eq!(
+            &format!("{:-<3}!", &b"\xf0\x28\x8c\xbc".as_bstr()),
+            "�(��!"
+        );
+        assert_eq!(
+            &format!("{:->3}!", &b"\xf0\x28\x8c\xbc".as_bstr()),
+            "�(��!"
+        );
+        assert_eq!(
+            &format!("{:-^3}!", &b"\xf0\x28\x8c\xbc".as_bstr()),
+            "�(��!"
+        );
+        assert_eq!(
+            &format!("{:-^2}!", &b"\xf0\x28\x8c\xbc".as_bstr()),
+            "�(��!"
+        );
+    }
+
+    quickcheck! {
+        fn total_length(bstr: BString) -> bool {
+            let size = bstr.chars().count();
+            format!("{:<1$}", bstr.as_bstr(), size).chars().count() >= size
+        }
+    }
+}
+
+#[cfg(test)]
 mod bstring_arbitrary {
     use bstring::BString;
 
@@ -758,4 +946,24 @@ mod bstring_arbitrary {
             Box::new(self.bytes.shrink().map(BString::from))
         }
     }
+}
+
+#[test]
+fn test_debug() {
+    use crate::{ByteSlice, B};
+
+    assert_eq!(
+        r#""\0\0\0 ftypisom\0\0\x02\0isomiso2avc1mp""#,
+        format!("{:?}", b"\0\0\0 ftypisom\0\0\x02\0isomiso2avc1mp".as_bstr()),
+    );
+
+    // Tests that if the underlying bytes contain the UTF-8 encoding of the
+    // replacement codepoint, then we emit the codepoint just like other
+    // non-printable Unicode characters.
+    assert_eq!(
+        b"\"\\xFF\xEF\xBF\xBD\\xFF\"".as_bstr(),
+        // Before fixing #72, the output here would be:
+        //   \\xFF\\xEF\\xBF\\xBD\\xFF
+        B(&format!("{:?}", b"\xFF\xEF\xBF\xBD\xFF".as_bstr())).as_bstr(),
+    );
 }

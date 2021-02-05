@@ -147,6 +147,13 @@ exports.js_renamed_export = () => {
     x.bar(x);
 };
 
+exports.js_renamed_field = () => {
+    const x = new wasm.RenamedField();
+    assert.ok(x.bar === 3);
+
+    x.foo();
+}
+
 exports.js_conditional_bindings = () => {
     const x = new wasm.ConditionalBindings();
     x.free();
@@ -200,7 +207,7 @@ exports.js_test_inspectable_classes = () => {
     assert.deepStrictEqual(inspectable.toJSON(), { a: inspectable.a });
     assert.strictEqual(inspectable.toString(), `{"a":${inspectable.a}}`);
     // Inspectable classes in Node.js have improved console.log formatting as well
-    assert.strictEqual(console_log_to_string(inspectable), `Inspectable { a: ${inspectable.a} }`);
+    assert(console_log_to_string(inspectable).endsWith(`{ a: ${inspectable.a} }`));
     // Non-inspectable classes do not have a toJSON or toString generated
     assert.strictEqual(not_inspectable.toJSON, undefined);
     assert.strictEqual(not_inspectable.toString(), '[object Object]');

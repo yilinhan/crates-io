@@ -21,13 +21,15 @@
 //! are useful in cyptographic functions, defending against timing based side
 //! channel attacks
 
-use sgx_types::marker::{BytewiseEquality};
-use core::mem;
 use alloc::slice;
+use core::mem;
+use sgx_types::marker::BytewiseEquality;
 
 pub trait ConsttimeMemEq<T: BytewiseEquality + ?Sized = Self> {
     fn consttime_memeq(&self, other: &T) -> bool;
-    fn consttime_memne(&self, other: &T) -> bool { !self.consttime_memeq(other) }
+    fn consttime_memne(&self, other: &T) -> bool {
+        !self.consttime_memeq(other)
+    }
 }
 
 impl<T> ConsttimeMemEq<[T]> for [T]
@@ -71,19 +73,15 @@ where
     }
 }
 
-unsafe fn consttime_memequal(
-    b1: *const u8,
-    b2: *const u8,
-    l: usize,
-) -> i32 {
-    let mut res: u32 = 0;
+unsafe fn consttime_memequal(b1: *const u8, b2: *const u8, l: usize) -> i32 {
+    let mut res: i32 = 0;
     let mut len = l;
     let p1 = slice::from_raw_parts(b1, l);
     let p2 = slice::from_raw_parts(b2, l);
 
     while len > 0 {
         len -= 1;
-        res |= (p1[len] ^ p2[len]) as u32;
+        res |= (p1[len] ^ p2[len]) as i32;
     }
     /*
      * Map 0 to 1 and [1, 256) to 0 using only constant-time
@@ -94,5 +92,5 @@ unsafe fn consttime_memequal(
      * advantage of them, certain compilers generate branches on
      * certain CPUs for `!res'.
      */
-    (1 & ((res - 1) >> 8)) as i32
+    1 & ((res - 1) >> 8)
 }

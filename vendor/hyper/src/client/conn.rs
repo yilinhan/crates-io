@@ -7,32 +7,81 @@
 //!
 //! If don't have need to manage connections yourself, consider using the
 //! higher-level [Client](super) API.
+//!
+//! ## Example
+//! A simple example that uses the `SendRequest` struct to talk HTTP over a Tokio TCP stream
+//! ```no_run
+//! # #[cfg(all(feature = "client", feature = "http1", feature = "runtime"))]
+//! # mod rt {
+//! use http::{Request, StatusCode};
+//! use hyper::{client::conn::Builder, Body};
+//! use tokio::net::TcpStream;
+//!
+//! #[tokio::main]
+//! async fn main() -> Result<(), Box<dyn std::error::Error>> {
+//!     let target_stream = TcpStream::connect("example.com:80").await?;
+//!
+//!     let (mut request_sender, connection) = Builder::new()
+//!         .handshake::<TcpStream, Body>(target_stream)
+//!         .await?;
+//!
+//!     // spawn a task to poll the connection and drive the HTTP state
+//!     tokio::spawn(async move {
+//!         if let Err(e) = connection.await {
+//!             eprintln!("Error in connection: {}", e);
+//!         }
+//!     });
+//!
+//!     let request = Request::builder()
+//!     // We need to manually add the host header because SendRequest does not
+//!         .header("Host", "example.com")
+//!         .method("GET")
+//!         .body(Body::from(""))?;
+//!
+//!     let response = request_sender.send_request(request).await?;
+//!     assert!(response.status() == StatusCode::OK);
+//!     Ok(())
+//! }
+//!
+//! # }
+//! ```
+
+use std::error::Error as StdError;
 use std::fmt;
-use std::mem;
+#[cfg(feature = "http2")]
+use std::marker::PhantomData;
 use std::sync::Arc;
+#[cfg(feature = "runtime")]
+#[cfg(feature = "http2")]
+use std::time::Duration;
 
 use bytes::Bytes;
 use futures_util::future::{self, Either, FutureExt as _};
-use pin_project::{pin_project, project};
+use pin_project::pin_project;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tower_service::Service;
 
 use super::dispatch;
-use crate::body::Payload;
-use crate::common::{task, BoxSendFuture, Exec, Executor, Future, Pin, Poll};
+use crate::body::HttpBody;
+use crate::common::{task, exec::{BoxSendFuture, Exec}, Future, Pin, Poll};
 use crate::proto;
+use crate::rt::Executor;
+#[cfg(feature = "http1")]
 use crate::upgrade::Upgraded;
 use crate::{Body, Request, Response};
 
+#[cfg(feature = "http1")]
 type Http1Dispatcher<T, B, R> = proto::dispatch::Dispatcher<proto::dispatch::Client<B>, B, T, R>;
 
-#[pin_project]
+#[pin_project(project = ProtoClientProj)]
 enum ProtoClient<T, B>
 where
-    B: Payload,
+    B: HttpBody,
 {
+    #[cfg(feature = "http1")]
     H1(#[pin] Http1Dispatcher<T, B, proto::h1::ClientTransaction>),
-    H2(#[pin] proto::h2::ClientTask<B>),
+    #[cfg(feature = "http2")]
+    H2(#[pin] proto::h2::ClientTask<B>, PhantomData<fn(T)>),
 }
 
 /// Returns a handshake future over some IO.
@@ -60,7 +109,7 @@ pub struct SendRequest<B> {
 pub struct Connection<T, B>
 where
     T: AsyncRead + AsyncWrite + Send + 'static,
-    B: Payload + 'static,
+    B: HttpBody + 'static,
 {
     inner: Option<ProtoClient<T, B>>,
 }
@@ -71,12 +120,20 @@ where
 #[derive(Clone, Debug)]
 pub struct Builder {
     pub(super) exec: Exec,
-    h1_writev: bool,
     h1_title_case_headers: bool,
     h1_read_buf_exact_size: Option<usize>,
     h1_max_buf_size: Option<usize>,
-    http2: bool,
+    #[cfg(feature = "http2")]
     h2_builder: proto::h2::client::Config,
+    version: Proto,
+}
+
+#[derive(Clone, Debug)]
+enum Proto {
+    #[cfg(feature = "http1")]
+    Http1,
+    #[cfg(feature = "http2")]
+    Http2,
 }
 
 /// A future returned by `SendRequest::send_request`.
@@ -118,6 +175,7 @@ pub struct Parts<T> {
 // A `SendRequest` that can be cloned to send HTTP2 requests.
 // private for now, probably not a great idea of a type...
 #[must_use = "futures do nothing unless polled"]
+#[cfg(feature = "http2")]
 pub(super) struct Http2SendRequest<B> {
     dispatch: dispatch::UnboundedSender<Request<B>, Response<Body>>,
 }
@@ -148,6 +206,7 @@ impl<B> SendRequest<B> {
         self.dispatch.is_closed()
     }
 
+    #[cfg(feature = "http2")]
     pub(super) fn into_http2(self) -> Http2SendRequest<B> {
         Http2SendRequest {
             dispatch: self.dispatch.unbound(),
@@ -157,7 +216,7 @@ impl<B> SendRequest<B> {
 
 impl<B> SendRequest<B>
 where
-    B: Payload + 'static,
+    B: HttpBody + 'static,
 {
     /// Sends a `Request` on the associated connection.
     ///
@@ -242,7 +301,7 @@ where
 
 impl<B> Service<Request<B>> for SendRequest<B>
 where
-    B: Payload + 'static,
+    B: HttpBody + 'static,
 {
     type Response = Response<Body>;
     type Error = crate::Error;
@@ -265,6 +324,7 @@ impl<B> fmt::Debug for SendRequest<B> {
 
 // ===== impl Http2SendRequest
 
+#[cfg(feature = "http2")]
 impl<B> Http2SendRequest<B> {
     pub(super) fn is_ready(&self) -> bool {
         self.dispatch.is_ready()
@@ -275,9 +335,10 @@ impl<B> Http2SendRequest<B> {
     }
 }
 
+#[cfg(feature = "http2")]
 impl<B> Http2SendRequest<B>
 where
-    B: Payload + 'static,
+    B: HttpBody + 'static,
 {
     pub(super) fn send_request_retryable(
         &mut self,
@@ -306,12 +367,14 @@ where
     }
 }
 
+#[cfg(feature = "http2")]
 impl<B> fmt::Debug for Http2SendRequest<B> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Http2SendRequest").finish()
     }
 }
 
+#[cfg(feature = "http2")]
 impl<B> Clone for Http2SendRequest<B> {
     fn clone(&self) -> Self {
         Http2SendRequest {
@@ -325,23 +388,28 @@ impl<B> Clone for Http2SendRequest<B> {
 impl<T, B> Connection<T, B>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-    B: Payload + Unpin + 'static,
+    B: HttpBody + Unpin + Send + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn StdError + Send + Sync>>,
 {
     /// Return the inner IO object, and additional information.
     ///
     /// Only works for HTTP/1 connections. HTTP/2 connections will panic.
     pub fn into_parts(self) -> Parts<T> {
-        let (io, read_buf, _) = match self.inner.expect("already upgraded") {
-            ProtoClient::H1(h1) => h1.into_inner(),
-            ProtoClient::H2(_h2) => {
+        match self.inner.expect("already upgraded") {
+            #[cfg(feature = "http1")]
+            ProtoClient::H1(h1) => {
+                let (io, read_buf, _) = h1.into_inner();
+                Parts {
+                    io,
+                    read_buf,
+                    _inner: (),
+                }
+            }
+            #[cfg(feature = "http2")]
+            ProtoClient::H2(..) => {
                 panic!("http2 cannot into_inner");
             }
-        };
-
-        Parts {
-            io,
-            read_buf,
-            _inner: (),
         }
     }
 
@@ -358,8 +426,10 @@ where
     /// to work with this function; or use the `without_shutdown` wrapper.
     pub fn poll_without_shutdown(&mut self, cx: &mut task::Context<'_>) -> Poll<crate::Result<()>> {
         match *self.inner.as_mut().expect("already upgraded") {
+            #[cfg(feature = "http1")]
             ProtoClient::H1(ref mut h1) => h1.poll_without_shutdown(cx),
-            ProtoClient::H2(ref mut h2) => Pin::new(h2).poll(cx).map_ok(|_| ()),
+            #[cfg(feature = "http2")]
+            ProtoClient::H2(ref mut h2, _) => Pin::new(h2).poll(cx).map_ok(|_| ()),
         }
     }
 
@@ -377,23 +447,27 @@ where
 impl<T, B> Future for Connection<T, B>
 where
     T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-    B: Payload + 'static,
+    B: HttpBody + Send + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn StdError + Send + Sync>>,
 {
     type Output = crate::Result<()>;
 
     fn poll(mut self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
         match ready!(Pin::new(self.inner.as_mut().unwrap()).poll(cx))? {
             proto::Dispatched::Shutdown => Poll::Ready(Ok(())),
-            proto::Dispatched::Upgrade(pending) => {
-                let h1 = match mem::replace(&mut self.inner, None) {
-                    Some(ProtoClient::H1(h1)) => h1,
-                    _ => unreachable!("Upgrade expects h1"),
-                };
-
-                let (io, buf, _) = h1.into_inner();
-                pending.fulfill(Upgraded::new(io, buf));
-                Poll::Ready(Ok(()))
-            }
+            #[cfg(feature = "http1")]
+            proto::Dispatched::Upgrade(pending) => match self.inner.take() {
+                Some(ProtoClient::H1(h1)) => {
+                    let (io, buf, _) = h1.into_inner();
+                    pending.fulfill(Upgraded::new(io, buf));
+                    Poll::Ready(Ok(()))
+                }
+                _ => {
+                    drop(pending);
+                    unreachable!("Upgrade expects h1");
+                }
+            },
         }
     }
 }
@@ -401,7 +475,7 @@ where
 impl<T, B> fmt::Debug for Connection<T, B>
 where
     T: AsyncRead + AsyncWrite + fmt::Debug + Send + 'static,
-    B: Payload + 'static,
+    B: HttpBody + 'static,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Connection").finish()
@@ -416,12 +490,15 @@ impl Builder {
     pub fn new() -> Builder {
         Builder {
             exec: Exec::Default,
-            h1_writev: true,
             h1_read_buf_exact_size: None,
             h1_title_case_headers: false,
             h1_max_buf_size: None,
-            http2: false,
+            #[cfg(feature = "http2")]
             h2_builder: Default::default(),
+            #[cfg(feature = "http1")]
+            version: Proto::Http1,
+            #[cfg(not(feature = "http1"))]
+            version: Proto::Http2,
         }
     }
 
@@ -431,11 +508,6 @@ impl Builder {
         E: Executor<BoxSendFuture> + Send + Sync + 'static,
     {
         self.exec = Exec::Executor(Arc::new(exec));
-        self
-    }
-
-    pub(super) fn h1_writev(&mut self, enabled: bool) -> &mut Builder {
-        self.h1_writev = enabled;
         self
     }
 
@@ -450,6 +522,7 @@ impl Builder {
         self
     }
 
+    #[cfg(feature = "http1")]
     pub(super) fn h1_max_buf_size(&mut self, max: usize) -> &mut Self {
         assert!(
             max >= proto::h1::MINIMUM_MAX_BUFFER_SIZE,
@@ -464,8 +537,12 @@ impl Builder {
     /// Sets whether HTTP2 is required.
     ///
     /// Default is false.
+    #[cfg(feature = "http2")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "http2")))]
     pub fn http2_only(&mut self, enabled: bool) -> &mut Builder {
-        self.http2 = enabled;
+        if enabled {
+            self.version = Proto::Http2
+        }
         self
     }
 
@@ -477,6 +554,8 @@ impl Builder {
     /// If not set, hyper will use a default.
     ///
     /// [spec]: https://http2.github.io/http2-spec/#SETTINGS_INITIAL_WINDOW_SIZE
+    #[cfg(feature = "http2")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "http2")))]
     pub fn http2_initial_stream_window_size(&mut self, sz: impl Into<Option<u32>>) -> &mut Self {
         if let Some(sz) = sz.into() {
             self.h2_builder.adaptive_window = false;
@@ -490,6 +569,8 @@ impl Builder {
     /// Passing `None` will do nothing.
     ///
     /// If not set, hyper will use a default.
+    #[cfg(feature = "http2")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "http2")))]
     pub fn http2_initial_connection_window_size(
         &mut self,
         sz: impl Into<Option<u32>>,
@@ -506,6 +587,8 @@ impl Builder {
     /// Enabling this will override the limits set in
     /// `http2_initial_stream_window_size` and
     /// `http2_initial_connection_window_size`.
+    #[cfg(feature = "http2")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "http2")))]
     pub fn http2_adaptive_window(&mut self, enabled: bool) -> &mut Self {
         use proto::h2::SPEC_WINDOW_SIZE;
 
@@ -517,6 +600,79 @@ impl Builder {
         self
     }
 
+    /// Sets the maximum frame size to use for HTTP2.
+    ///
+    /// Passing `None` will do nothing.
+    ///
+    /// If not set, hyper will use a default.
+    #[cfg(feature = "http2")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "http2")))]
+    pub fn http2_max_frame_size(&mut self, sz: impl Into<Option<u32>>) -> &mut Self {
+        if let Some(sz) = sz.into() {
+            self.h2_builder.max_frame_size = sz;
+        }
+        self
+    }
+
+    /// Sets an interval for HTTP2 Ping frames should be sent to keep a
+    /// connection alive.
+    ///
+    /// Pass `None` to disable HTTP2 keep-alive.
+    ///
+    /// Default is currently disabled.
+    ///
+    /// # Cargo Feature
+    ///
+    /// Requires the `runtime` cargo feature to be enabled.
+    #[cfg(feature = "runtime")]
+    #[cfg(feature = "http2")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "http2")))]
+    pub fn http2_keep_alive_interval(
+        &mut self,
+        interval: impl Into<Option<Duration>>,
+    ) -> &mut Self {
+        self.h2_builder.keep_alive_interval = interval.into();
+        self
+    }
+
+    /// Sets a timeout for receiving an acknowledgement of the keep-alive ping.
+    ///
+    /// If the ping is not acknowledged within the timeout, the connection will
+    /// be closed. Does nothing if `http2_keep_alive_interval` is disabled.
+    ///
+    /// Default is 20 seconds.
+    ///
+    /// # Cargo Feature
+    ///
+    /// Requires the `runtime` cargo feature to be enabled.
+    #[cfg(feature = "runtime")]
+    #[cfg(feature = "http2")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "http2")))]
+    pub fn http2_keep_alive_timeout(&mut self, timeout: Duration) -> &mut Self {
+        self.h2_builder.keep_alive_timeout = timeout;
+        self
+    }
+
+    /// Sets whether HTTP2 keep-alive should apply while the connection is idle.
+    ///
+    /// If disabled, keep-alive pings are only sent while there are open
+    /// request/responses streams. If enabled, pings are also sent when no
+    /// streams are active. Does nothing if `http2_keep_alive_interval` is
+    /// disabled.
+    ///
+    /// Default is `false`.
+    ///
+    /// # Cargo Feature
+    ///
+    /// Requires the `runtime` cargo feature to be enabled.
+    #[cfg(feature = "runtime")]
+    #[cfg(feature = "http2")]
+    #[cfg_attr(docsrs, doc(cfg(feature = "http2")))]
+    pub fn http2_keep_alive_while_idle(&mut self, enabled: bool) -> &mut Self {
+        self.h2_builder.keep_alive_while_idle = enabled;
+        self
+    }
+
     /// Constructs a connection with the configured options and IO.
     pub fn handshake<T, B>(
         &self,
@@ -524,35 +680,40 @@ impl Builder {
     ) -> impl Future<Output = crate::Result<(SendRequest<B>, Connection<T, B>)>>
     where
         T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
-        B: Payload + 'static,
+        B: HttpBody + 'static,
+        B::Data: Send,
+        B::Error: Into<Box<dyn StdError + Send + Sync>>,
     {
         let opts = self.clone();
 
         async move {
-            trace!("client handshake HTTP/{}", if opts.http2 { 2 } else { 1 });
+            trace!("client handshake {:?}", opts.version);
 
             let (tx, rx) = dispatch::channel();
-            let proto = if !opts.http2 {
-                let mut conn = proto::Conn::new(io);
-                if !opts.h1_writev {
-                    conn.set_write_strategy_flatten();
+            let proto = match opts.version {
+                #[cfg(feature = "http1")]
+                Proto::Http1 => {
+                    let mut conn = proto::Conn::new(io);
+                    if opts.h1_title_case_headers {
+                        conn.set_title_case_headers();
+                    }
+                    if let Some(sz) = opts.h1_read_buf_exact_size {
+                        conn.set_read_buf_exact_size(sz);
+                    }
+                    if let Some(max) = opts.h1_max_buf_size {
+                        conn.set_max_buf_size(max);
+                    }
+                    let cd = proto::h1::dispatch::Client::new(rx);
+                    let dispatch = proto::h1::Dispatcher::new(cd, conn);
+                    ProtoClient::H1(dispatch)
                 }
-                if opts.h1_title_case_headers {
-                    conn.set_title_case_headers();
+                #[cfg(feature = "http2")]
+                Proto::Http2 => {
+                    let h2 =
+                        proto::h2::client::handshake(io, rx, &opts.h2_builder, opts.exec.clone())
+                            .await?;
+                    ProtoClient::H2(h2, PhantomData)
                 }
-                if let Some(sz) = opts.h1_read_buf_exact_size {
-                    conn.set_read_buf_exact_size(sz);
-                }
-                if let Some(max) = opts.h1_max_buf_size {
-                    conn.set_max_buf_size(max);
-                }
-                let cd = proto::h1::dispatch::Client::new(rx);
-                let dispatch = proto::h1::Dispatcher::new(cd, conn);
-                ProtoClient::H1(dispatch)
-            } else {
-                let h2 = proto::h2::client::handshake(io, rx, &opts.h2_builder, opts.exec.clone())
-                    .await?;
-                ProtoClient::H2(h2)
             };
 
             Ok((
@@ -596,16 +757,18 @@ impl fmt::Debug for ResponseFuture {
 impl<T, B> Future for ProtoClient<T, B>
 where
     T: AsyncRead + AsyncWrite + Send + Unpin + 'static,
-    B: Payload + 'static,
+    B: HttpBody + Send + 'static,
+    B::Data: Send,
+    B::Error: Into<Box<dyn StdError + Send + Sync>>,
 {
     type Output = crate::Result<proto::Dispatched>;
 
-    #[project]
     fn poll(self: Pin<&mut Self>, cx: &mut task::Context<'_>) -> Poll<Self::Output> {
-        #[project]
         match self.project() {
-            ProtoClient::H1(c) => c.poll(cx),
-            ProtoClient::H2(c) => c.poll(cx),
+            #[cfg(feature = "http1")]
+            ProtoClientProj::H1(c) => c.poll(cx),
+            #[cfg(feature = "http2")]
+            ProtoClientProj::H2(c, _) => c.poll(cx),
         }
     }
 }
@@ -622,7 +785,8 @@ impl<B: Send> AssertSendSync for SendRequest<B> {}
 impl<T: Send, B: Send> AssertSend for Connection<T, B>
 where
     T: AsyncRead + AsyncWrite + Send + 'static,
-    B: Payload + 'static,
+    B: HttpBody + 'static,
+    B::Data: Send,
 {
 }
 
@@ -630,7 +794,7 @@ where
 impl<T: Send + Sync, B: Send + Sync> AssertSendSync for Connection<T, B>
 where
     T: AsyncRead + AsyncWrite + Send + 'static,
-    B: Payload + 'static,
+    B: HttpBody + 'static,
     B::Data: Send + Sync + 'static,
 {
 }

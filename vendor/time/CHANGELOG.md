@@ -7,9 +7,239 @@ Versioning].
 
 ---
 
-## Unreleased
+## 0.2.25 [2021-01-24]
 
-None.
+### Fixed
+
+- Fix #309, which can cause panics in certain situations.
+
+## 0.2.24 [2021-01-08]
+
+### Fixed
+
+- The implementation of `OffsetDateTime::timestamp`, `OffsetDateTime::unix_timestamp`,
+  `PrimitiveDatetime::timestamp`, and `OffsetDateTime::unix_timestamp` have been corrected. This
+  affects all negative timestamps with a nonzero subsecond value.
+
+## 0.2.23 [2020-11-17]
+
+## Compatibility notes
+
+Due to #293, any method that requires knowledge of the local offset will now
+_fail_ on Linux. For `try_` methods, this means returning an error. For others,
+it means assuming UTC.
+
+### Deprecated
+
+- `UtcOffset::timestamp` (moved to `UtcOffset::unix_timestamp`)
+- `UtcOffset::timestamp_nanos` (moved to `UtcOffset::unix_timestamp_nanos`)
+- `date` (moved to `macros::date`)
+- `time` (moved to `macros::time`)
+- `offset` (moved to `macros::offset`)
+- `OffsetDateTime::now_local` (assumes UTC if unable to be determined)
+- `UtcOffset::local_offset_at` (assumes UTC if unable to be determined)
+- `UtcOffset::current_local_offset` (assumes UTC if unable to be determined)
+
+## 0.2.22 [2020-09-25]
+
+### Fixed
+
+- Solaris & Illumos now successfully build.
+- `Duration::new` could previously result in an inconsistent internal state.
+  This led to some odd situations where a `Duration` could be both positive and
+  negative. This has been fixed such that the internal state maintains its
+  invariants.
+
+## 0.2.21 [2020-09-20]
+
+### Changed
+
+- Implementation details of some error types have been exposed. This means that
+  data about a component being out of range can be directly obtained, while an
+  invalid offset or conversion error is guaranteed to be a zero-sized type.
+- The following functions are `const fn` on rustc ≥ 1.46:
+  - `Date::try_from_iso_ywd`
+  - `Date::iso_year_week`
+  - `Date::week`
+  - `Date::sunday_based_week`
+  - `Date::monday_based_week`
+  - `Date::try_with_hms`
+  - `Date::try_with_hms_milli`
+  - `Date::try_with_hms_micro`
+  - `Date::try_with_hms_nano`
+  - `PrimitiveDateTime::iso_year_week`
+  - `PrimitiveDateTime::week`
+  - `PrimitiveDateTime::sunday_based_week`
+  - `PrimitiveDateTime::monday_based_week`
+  - `util::weeks_in_year`
+
+## 0.2.20 [2020-09-16]
+
+### Added
+
+- `OffsetDateTime::timestamp_nanos`
+- `OffsetDateTime::from_unix_timestamp_nanos`
+
+### Fixed
+
+A bug with far-reaching consequences has been fixed. See #276 for complete
+details, but the gist is that the constructing a `Date` from a valid Julian day
+may result in an invalid value or even panic. As a consequence of implementation
+details, this affects nearly all arithmetic with `Date`s (and as a result also
+`PrimitiveDateTime`s and `OffsetDateTime`s).
+
+### Improvements
+
+- Document how to construct an `OffsetDateTime` from a timestamp-nanosecond
+  pair
+
+## 0.2.19 [2020-09-12]
+
+### Fixed
+
+- The build script now declares a dependency on the `COMPILING_UNDER_CARGO_WEB`
+  environment variable.
+- Parsing the `%D` specifier no longer requires padding on the month.
+  Previously, `Err(InvalidMonth)` was incorrectly returned.
+- A `std::time::Duration` that is larger than `time::Duration::max_value()` now
+  correctly returns `Ordering::Greater` when compared.
+- Multiplying and assigning an integer by `Sign::Zero` now sets the integer to
+  be zero. This previously left the integer unmodified.
+
+## 0.2.18 [2020-09-08]
+
+### Changed
+
+- The following functions are `const fn` on rustc ≥ 1.46:
+  - `Date::try_from_ymd`
+  - `Date::try_from_yo`
+  - `Time::try_from_hms`
+  - `Time::try_from_hms_milli`
+  - `Time::try_from_hms_micro`
+  - `Time::try_from_hms_nano`
+- An `error` module has been created where all existing error types are
+  contained. The `Error` suffix has been dropped from these types.
+- An `ext` module has been created where extension traits are contained.
+- A `util` module has been created where utility functions are contained.
+- `error::ComponentRange` now implements `Copy`.
+
+For back-compatibility, all items that were moved to newly-contained modules
+have been re-exported from their previous locations (and in the case of the
+`error` module, with their previous name).
+
+### Fixes
+
+Parsing `format::Rfc3339` now correctly handles the UTC offset (#274).
+
+## 0.2.17 [2020-09-01]
+
+### Changed
+
+The following functions are `const fn` on rustc ≥ 1.46:
+
+- `Date::year`
+- `Date::month`
+- `Date::day`
+- `Date::month_day`
+- `Date::ordinal`
+- `Date::as_ymd`
+- `Date::as_yo`
+- `Date::julian_day`
+- `Duration::checked_div`
+- `PrimitiveDateTime::year`
+- `PrimitiveDateTime::month`
+- `PrimitiveDateTime::day`
+- `PrimitiveDateTime::month_day`
+- `PrimitiveDateTime::ordinal`
+- `Weekday::previous`
+- `Weekday::next`
+
+### Improvements
+
+- `size_of::<Date>()` has been reduced from 8 to 4. As a consequence,
+  `size_of::<PrimitiveDatetime>()` went from 16 to 12 and
+  `size_of::<OffsetDateTime>()` from 20 to 16. This change also results in a
+  performance improvement of approximately 30% on the `Date::year` and
+  `Date::ordinal` methods.
+- `cfg-if` has been removed as a dependency.
+
+### Fixed
+
+- `cfg` flags passed to rustc will no longer collide with other crates (at least
+  unless they're doing something very stupid).
+- The crate will successfully compile with any combination of feature flags.
+  Previously, some combinations would fail.
+
+## 0.2.16 [2020-05-12]
+
+### Added
+
+`OffsetDateTime`s can now be represented as Unix timestamps with serde. To do
+this, you can use the `time::serde::timestamp` and
+`time::serde::timestamp::option` modules.
+
+## 0.2.15 [2020-05-04]
+
+### Fixed
+
+`cargo-web` support works, and is now explicitly checked in CI. A previous
+change was made that made a method call ambiguous.
+
+## 0.2.14 [2020-05-02]
+
+### Fixed
+
+Adding/subtracting a `core::time::Duration` now correctly takes subsecond
+values into account. This also affects `PrimitiveDateTime` and `OffsetDateTime`.
+
+## 0.2.13 [2020-05-01]
+
+### Fixed
+
+Panicking APIs are re-exposed.
+
+## 0.2.12 [2020-04-30]
+
+### Fixed
+
+Subtracting `Instant`s can correctly result in a negative duration, rather than
+resulting in the absolute value of it.
+
+## 0.2.11 [2020-04-27]
+
+### Added
+
+- `OffsetDateTime::now_utc`
+
+### Deprecated
+
+- `OffsetDateTime::now` due to the offset not being clear from the method name
+  alone.
+
+### Fixed
+
+`Date`s are now uniformly random when using the `rand` crate. Previously, both
+the year and day within the year were uniform, but this meant that any given day
+in a leap year was slightly less likely to be chosen than a day in a non-leap
+year.
+
+### Changed
+
+- MSRV is lowered to 1.32.0.
+
+## 0.2.10 [2020-04-19]
+
+### Added
+
+- Support for formatting and parsing `OffsetDateTime`s as RFC3339.
+- Lazy formatting. To avoid exposing implementation details, we're just
+  returning `impl Display`, rather than a concrete type.
+- Add support for Illumos.
+
+### Fixed
+
+- Deprecated APIs from time v0.1 are public again. They were previously hidden
+  by accident in 0.2.9.
 
 ## 0.2.9 [2020-03-13]
 

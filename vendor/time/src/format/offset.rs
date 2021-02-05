@@ -2,15 +2,17 @@
 
 #![allow(non_snake_case)]
 
-use super::{
-    parse::{try_consume_exact_digits_in_range, try_consume_first_match},
-    Padding, ParsedItems,
+use crate::{
+    error,
+    format::{
+        parse::{try_consume_exact_digits, try_consume_first_match},
+        Padding, ParsedItems,
+    },
+    ParseResult, UtcOffset,
 };
-use crate::internal_prelude::*;
 use core::fmt::{self, Formatter};
 
 /// UTC offset
-#[inline(always)]
 pub(crate) fn fmt_z(f: &mut Formatter<'_>, offset: UtcOffset) -> fmt::Result {
     let offset = offset.as_duration();
 
@@ -24,16 +26,15 @@ pub(crate) fn fmt_z(f: &mut Formatter<'_>, offset: UtcOffset) -> fmt::Result {
 }
 
 /// UTC offset
-#[inline(always)]
 pub(crate) fn parse_z(items: &mut ParsedItems, s: &mut &str) -> ParseResult<()> {
     let sign = try_consume_first_match(s, [("+", 1), ("-", -1)].iter().cloned())
-        .ok_or(ParseError::InvalidOffset)?;
+        .ok_or(error::Parse::InvalidOffset)?;
 
-    let hours: i16 = try_consume_exact_digits_in_range(s, 2, 0..24, Padding::Zero)
-        .ok_or(ParseError::InvalidOffset)?;
+    let hours: i16 =
+        try_consume_exact_digits(s, 2, Padding::Zero).ok_or(error::Parse::InvalidOffset)?;
 
-    let minutes = try_consume_exact_digits_in_range(s, 2, 0..60, Padding::Zero)
-        .ok_or(ParseError::InvalidOffset)?;
+    let minutes: i16 =
+        try_consume_exact_digits(s, 2, Padding::Zero).ok_or(error::Parse::InvalidOffset)?;
 
     items.offset = UtcOffset::minutes(sign * (hours * 60 + minutes)).into();
     Ok(())

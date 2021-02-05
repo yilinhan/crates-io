@@ -1,21 +1,32 @@
-use super::codec::Reader;
 use super::codec::Codec;
+use super::codec::Reader;
+use super::enums::{AlertDescription, AlertLevel, HandshakeType};
 use super::message::Message;
 
 use std::fs;
 use std::io::Read;
+use std::path::{Path, PathBuf};
 
 #[test]
 fn test_read_fuzz_corpus() {
-    let prefix = "fuzz/corpus/message/";
-    for file in fs::read_dir(prefix).unwrap() {
+    fn corpus_dir() -> PathBuf {
+        let from_subcrate = Path::new("../fuzz/corpus/message");
+        let from_root = Path::new("fuzz/corpus/message");
+
+        if from_root.is_dir() {
+            from_root.to_path_buf()
+        } else {
+            from_subcrate.to_path_buf()
+        }
+    }
+
+    for file in fs::read_dir(corpus_dir()).unwrap() {
         let mut f = fs::File::open(file.unwrap().path()).unwrap();
         let mut bytes = Vec::new();
         f.read_to_end(&mut bytes).unwrap();
 
         let mut rd = Reader::init(&bytes);
-        let msg = Message::read(&mut rd)
-            .unwrap();
+        let msg = Message::read(&mut rd).unwrap();
         println!("{:?}", msg);
         assert_eq!(bytes.to_vec(), msg.get_encoding());
     }
@@ -44,8 +55,37 @@ fn can_read_safari_client_hello() {
         \x79\x2f\x33\x08\x68\x74\x74\x70\x2f\x31\x2e\x31\x00\x0b\x00\x02\
         \x01\x00\x00\x0a\x00\x0a\x00\x08\x00\x1d\x00\x17\x00\x18\x00\x19";
     let mut rd = Reader::init(bytes);
-    let mut m = Message::read(&mut rd)
-        .unwrap();
+    let mut m = Message::read(&mut rd).unwrap();
     println!("m = {:?}", m);
     assert_eq!(m.decode_payload(), false);
+}
+
+#[test]
+fn alert_is_not_handshake() {
+    let m = Message::build_alert(AlertLevel::Fatal, AlertDescription::DecodeError);
+    assert_eq!(false, m.is_handshake_type(HandshakeType::ClientHello));
+}
+
+#[test]
+fn alert_is_not_opaque() {
+    let mut m = Message::build_alert(AlertLevel::Fatal, AlertDescription::DecodeError);
+    assert_eq!(None, m.take_opaque_payload());
+    assert_eq!(false, m.decode_payload());
+}
+
+#[test]
+fn construct_all_types() {
+    let samples = [
+        &b"\x14\x03\x04\x00\x01\x01"[..],
+        &b"\x15\x03\x04\x00\x02\x01\x16"[..],
+        &b"\x16\x03\x04\x00\x05\x18\x00\x00\x01\x00"[..],
+        &b"\x17\x03\x04\x00\x04\x11\x22\x33\x44"[..],
+        &b"\x18\x03\x04\x00\x04\x11\x22\x33\x44"[..],
+    ];
+    for bytes in samples.iter() {
+        let mut m = Message::read_bytes(bytes).unwrap();
+        println!("m = {:?}", m);
+        m.decode_payload();
+        println!("m' = {:?}", m);
+    }
 }

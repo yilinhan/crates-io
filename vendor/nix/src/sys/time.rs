@@ -60,10 +60,21 @@ const TS_MAX_SECONDS: i64 = ::std::isize::MAX as i64;
 
 const TS_MIN_SECONDS: i64 = -TS_MAX_SECONDS;
 
+impl From<timespec> for TimeSpec {
+    fn from(ts: timespec) -> Self {
+        Self(ts)
+    }
+}
 
 impl AsRef<timespec> for TimeSpec {
     fn as_ref(&self) -> &timespec {
         &self.0
+    }
+}
+
+impl AsMut<timespec> for TimeSpec {
+    fn as_mut(&mut self) -> &mut timespec {
+        &mut self.0
     }
 }
 
@@ -239,7 +250,7 @@ impl fmt::Display for TimeSpec {
 
 
 
-#[repr(C)]
+#[repr(transparent)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct TimeVal(timeval);
 
@@ -256,6 +267,12 @@ const TV_MIN_SECONDS: i64 = -TV_MAX_SECONDS;
 impl AsRef<timeval> for TimeVal {
     fn as_ref(&self) -> &timeval {
         &self.0
+    }
+}
+
+impl AsMut<timeval> for TimeVal {
+    fn as_mut(&mut self) -> &mut timeval {
+        &mut self.0
     }
 }
 

@@ -209,6 +209,12 @@ s! {
         pub imr_interface: in_addr,
     }
 
+    pub struct ip_mreqn {
+        pub imr_multiaddr: in_addr,
+        pub imr_address: in_addr,
+        pub imr_ifindex: ::c_int,
+    }
+
     pub struct ipv6_mreq {
         pub ipv6mr_multiaddr: in6_addr,
         pub ipv6mr_interface: ::c_uint,
@@ -1327,6 +1333,7 @@ pub const S_ISGID: ::c_int = 0x400;
 pub const S_ISVTX: ::c_int = 0x200;
 
 pub const IF_NAMESIZE: ::size_t = 16;
+pub const IFNAMSIZ: ::size_t = IF_NAMESIZE;
 
 pub const LOG_EMERG: ::c_int = 0;
 pub const LOG_ALERT: ::c_int = 1;
@@ -1453,8 +1460,6 @@ pub const RUSAGE_SELF: ::c_int = 0;
 pub const O_RDONLY: ::c_int = 0;
 pub const O_WRONLY: ::c_int = 1;
 pub const O_RDWR: ::c_int = 2;
-
-pub const SOCK_CLOEXEC: ::c_int = O_CLOEXEC;
 
 pub const S_IFIFO: ::mode_t = 4096;
 pub const S_IFCHR: ::mode_t = 8192;
@@ -1762,14 +1767,17 @@ pub const SCM_TIMESTAMP: ::c_int = SO_TIMESTAMP;
 
 pub const SOCK_RAW: ::c_int = 3;
 pub const SOCK_RDM: ::c_int = 4;
+
+pub const IP_TTL: ::c_int = 2;
+pub const IP_HDRINCL: ::c_int = 3;
+pub const IP_FREEBIND: ::c_int = 15;
+pub const IP_TRANSPARENT: ::c_int = 19;
 pub const IP_MULTICAST_IF: ::c_int = 32;
 pub const IP_MULTICAST_TTL: ::c_int = 33;
 pub const IP_MULTICAST_LOOP: ::c_int = 34;
-pub const IP_TTL: ::c_int = 2;
-pub const IP_HDRINCL: ::c_int = 3;
 pub const IP_ADD_MEMBERSHIP: ::c_int = 35;
 pub const IP_DROP_MEMBERSHIP: ::c_int = 36;
-pub const IP_TRANSPARENT: ::c_int = 19;
+
 pub const IPV6_UNICAST_HOPS: ::c_int = 16;
 pub const IPV6_MULTICAST_IF: ::c_int = 17;
 pub const IPV6_MULTICAST_HOPS: ::c_int = 18;
@@ -1979,6 +1987,13 @@ pub const LOG_PERROR: ::c_int = 0x20;
 pub const PIPE_BUF: usize = 4096;
 
 pub const SI_LOAD_SHIFT: ::c_uint = 16;
+
+pub const CLD_EXITED: ::c_int = 1;
+pub const CLD_KILLED: ::c_int = 2;
+pub const CLD_DUMPED: ::c_int = 3;
+pub const CLD_TRAPPED: ::c_int = 4;
+pub const CLD_STOPPED: ::c_int = 5;
+pub const CLD_CONTINUED: ::c_int = 6;
 
 pub const SIGEV_SIGNAL: ::c_int = 0;
 pub const SIGEV_NONE: ::c_int = 1;
@@ -2891,7 +2906,8 @@ pub const O_SYNC: ::c_int = 0x00000040 | O_DSYNC;
 pub const O_RSYNC: ::c_int = O_SYNC;
 pub const O_DSYNC: ::c_int = 0x00000020;
 
-pub const SOCK_NONBLOCK: ::c_int = 2048;
+pub const SOCK_CLOEXEC: ::c_int = 0o2000000;
+pub const SOCK_NONBLOCK: ::c_int = 0o4000;
 
 pub const MAP_ANON: ::c_int = 0x0020;
 pub const MAP_GROWSDOWN: ::c_int = 0x0100;
@@ -3158,42 +3174,6 @@ f! {
         }
     }
 
-    pub fn WIFSTOPPED(status: ::c_int) -> bool {
-        (status & 0xff) == 0x7f
-    }
-
-    pub fn WSTOPSIG(status: ::c_int) -> ::c_int {
-        (status >> 8) & 0xff
-    }
-
-    pub fn WIFCONTINUED(status: ::c_int) -> bool {
-        status == 0xffff
-    }
-
-    pub fn WIFSIGNALED(status: ::c_int) -> bool {
-        ((status & 0x7f) + 1) as i8 >= 2
-    }
-
-    pub fn WTERMSIG(status: ::c_int) -> ::c_int {
-        status & 0x7f
-    }
-
-    pub fn WIFEXITED(status: ::c_int) -> bool {
-        (status & 0x7f) == 0
-    }
-
-    pub fn WEXITSTATUS(status: ::c_int) -> ::c_int {
-        (status >> 8) & 0xff
-    }
-
-    pub fn WCOREDUMP(status: ::c_int) -> bool {
-        (status & 0x80) != 0
-    }
-
-    pub fn QCMD(cmd: ::c_int, type_: ::c_int) -> ::c_int {
-        (cmd << 8) | (type_ & 0x00ff)
-    }
-
     pub fn CPU_ZERO(cpuset: &mut cpu_set_t) -> () {
         for slot in cpuset.bits.iter_mut() {
             *slot = 0;
@@ -3250,6 +3230,98 @@ f! {
         dev |= (minor & 0xffffff00) << 12;
         dev
     }
+
+    pub fn CMSG_DATA(cmsg: *const cmsghdr) -> *mut c_uchar {
+        cmsg.offset(1) as *mut c_uchar
+    }
+
+    pub fn CMSG_NXTHDR(mhdr: *const msghdr, cmsg: *const cmsghdr)
+        -> *mut cmsghdr
+    {
+        if ((*cmsg).cmsg_len as ::size_t) < ::mem::size_of::<cmsghdr>() {
+            0 as *mut cmsghdr
+        } else if __CMSG_NEXT(cmsg).add(::mem::size_of::<cmsghdr>())
+            >= __MHDR_END(mhdr) {
+            0 as *mut cmsghdr
+        } else {
+            __CMSG_NEXT(cmsg).cast()
+        }
+    }
+
+    pub fn CMSG_FIRSTHDR(mhdr: *const msghdr) -> *mut cmsghdr {
+        if (*mhdr).msg_controllen as ::size_t >= ::mem::size_of::<cmsghdr>() {
+            (*mhdr).msg_control.cast()
+        } else {
+            0 as *mut cmsghdr
+        }
+    }
+
+    pub fn CMSG_ALIGN(len: ::size_t) -> ::size_t {
+        (len + ::mem::size_of::<::size_t>() - 1)
+            & !(::mem::size_of::<::size_t>() - 1)
+    }
+
+    pub fn CMSG_SPACE(len: ::c_uint) -> ::c_uint {
+        (CMSG_ALIGN(len as ::size_t) + CMSG_ALIGN(::mem::size_of::<cmsghdr>()))
+            as ::c_uint
+    }
+
+    pub fn CMSG_LEN(len: ::c_uint) -> ::c_uint {
+        (CMSG_ALIGN(::mem::size_of::<cmsghdr>()) + len as ::size_t) as ::c_uint
+    }
+}
+
+safe_f! {
+    pub {const} fn WIFSTOPPED(status: ::c_int) -> bool {
+        (status & 0xff) == 0x7f
+    }
+
+    pub {const} fn WSTOPSIG(status: ::c_int) -> ::c_int {
+        (status >> 8) & 0xff
+    }
+
+    pub {const} fn WIFCONTINUED(status: ::c_int) -> bool {
+        status == 0xffff
+    }
+
+    pub {const} fn WIFSIGNALED(status: ::c_int) -> bool {
+        ((status & 0x7f) + 1) as i8 >= 2
+    }
+
+    pub {const} fn WTERMSIG(status: ::c_int) -> ::c_int {
+        status & 0x7f
+    }
+
+    pub {const} fn WIFEXITED(status: ::c_int) -> bool {
+        (status & 0x7f) == 0
+    }
+
+    pub {const} fn WEXITSTATUS(status: ::c_int) -> ::c_int {
+        (status >> 8) & 0xff
+    }
+
+    pub {const} fn WCOREDUMP(status: ::c_int) -> bool {
+        (status & 0x80) != 0
+    }
+
+    pub {const} fn QCMD(cmd: ::c_int, type_: ::c_int) -> ::c_int {
+        (cmd << 8) | (type_ & 0x00ff)
+    }
+}
+
+fn __CMSG_LEN(cmsg: *const cmsghdr) -> ::ssize_t {
+    ((unsafe { (*cmsg).cmsg_len as ::size_t } + ::mem::size_of::<::c_long>()
+        - 1)
+        & !(::mem::size_of::<::c_long>() - 1)) as ::ssize_t
+}
+
+fn __CMSG_NEXT(cmsg: *const cmsghdr) -> *mut c_uchar {
+    (unsafe { cmsg.offset(__CMSG_LEN(cmsg)) }) as *mut c_uchar
+}
+
+fn __MHDR_END(mhdr: *const msghdr) -> *mut c_uchar {
+    unsafe { (*mhdr).msg_control.offset((*mhdr).msg_controllen as isize) }
+        .cast()
 }
 
 // EXTERN_FN

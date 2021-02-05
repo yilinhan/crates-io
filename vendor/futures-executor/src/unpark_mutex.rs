@@ -43,8 +43,8 @@ const REPOLL: usize = 2;        // --> POLLING
 const COMPLETE: usize = 3;      // No transitions out
 
 impl<D> UnparkMutex<D> {
-    pub(crate) fn new() -> UnparkMutex<D> {
-        UnparkMutex {
+    pub(crate) fn new() -> Self {
+        Self {
             status: AtomicUsize::new(WAITING),
             inner: UnsafeCell::new(None),
         }
@@ -108,7 +108,7 @@ impl<D> UnparkMutex<D> {
         self.status.store(POLLING, SeqCst);
     }
 
-    /// Alert the mutex that polling completed with NotReady.
+    /// Alert the mutex that polling completed with `Pending`.
     ///
     /// # Safety
     ///

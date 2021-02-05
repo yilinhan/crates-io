@@ -416,7 +416,7 @@ pub const MAP_NONBLOCK: ::c_int = 0x010000;
 pub const MAP_STACK: ::c_int = 0x020000;
 pub const MAP_HUGETLB: ::c_int = 0x040000;
 pub const MAP_GROWSDOWN: ::c_int = 0x0100;
-pub const MAP_SYNC : ::c_int = 0x080000;
+pub const MAP_SYNC: ::c_int = 0x080000;
 
 pub const EDEADLOCK: ::c_int = 35;
 pub const EUCLEAN: ::c_int = 117;
@@ -543,6 +543,8 @@ pub const FIONBIO: ::c_ulong = 0x5421;
 
 pub const PTRACE_GETFPXREGS: ::c_uint = 18;
 pub const PTRACE_SETFPXREGS: ::c_uint = 19;
+pub const PTRACE_SYSEMU: ::c_uint = 31;
+pub const PTRACE_SYSEMU_SINGLESTEP: ::c_uint = 32;
 
 pub const MCL_CURRENT: ::c_int = 0x0001;
 pub const MCL_FUTURE: ::c_int = 0x0002;
@@ -1101,6 +1103,8 @@ pub const SYS_pkey_mprotect: ::c_long = 380;
 pub const SYS_pkey_alloc: ::c_long = 381;
 pub const SYS_pkey_free: ::c_long = 382;
 pub const SYS_statx: ::c_long = 383;
+pub const SYS_pidfd_open: ::c_long = 434;
+pub const SYS_clone3: ::c_long = 435;
 
 // offsets in user_regs_structs, from sys/reg.h
 pub const EBX: ::c_int = 0;

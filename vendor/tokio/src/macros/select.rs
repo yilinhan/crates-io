@@ -4,7 +4,7 @@
 /// The `select!` macro must be used inside of async functions, closures, and
 /// blocks.
 ///
-/// The `select` macro accepts one or more branches with the following pattern:
+/// The `select!` macro accepts one or more branches with the following pattern:
 ///
 /// ```text
 /// <pattern> = <async expression> (, if <precondition>)? => <handler>,
@@ -24,13 +24,13 @@
 /// expression.
 ///
 /// Additionally, each branch may include an optional `if` precondition. This
-/// precondition is evaluated **before** the <async expression>. If the
+/// precondition is evaluated **before** the `<async expression>`. If the
 /// precondition returns `false`, the branch is entirely disabled. This
 /// capability is useful when using `select!` within a loop.
 ///
 /// The complete lifecycle of a `select!` expression is as follows:
 ///
-/// 1. Evaluate all provded `<precondition>` expressions. If the precondition
+/// 1. Evaluate all provided `<precondition>` expressions. If the precondition
 ///    returns `false`, disable the branch for the remainder of the current call
 ///    to `select!`. Re-entering `select!` due to a loop clears the "disabled"
 ///    state.
@@ -41,7 +41,7 @@
 /// 4. Once an `<async expression>` returns a value, attempt to apply the value
 ///    to the provided `<pattern>`, if the pattern matches, evaluate `<handler>`
 ///    and return. If the pattern **does not** match, disable the current branch
-///    and for the remainder of the current call to `select!. Continue from step 3.
+///    and for the remainder of the current call to `select!`. Continue from step 3.
 /// 5. If **all** branches are disabled, evaluate the `else` expression. If none
 ///    is provided, panic.
 ///
@@ -63,9 +63,9 @@
 /// Given that `if` preconditions are used to disable `select!` branches, some
 /// caution must be used to avoid missing values.
 ///
-/// For example, here is **incorrect** usage of `delay` with `if`. The objective
+/// For example, here is **incorrect** usage of `sleep` with `if`. The objective
 /// is to repeatedly run an asynchronous task for up to 50 milliseconds.
-/// However, there is a potential for the `delay` completion to be missed.
+/// However, there is a potential for the `sleep` completion to be missed.
 ///
 /// ```no_run
 /// use tokio::time::{self, Duration};
@@ -76,11 +76,12 @@
 ///
 /// #[tokio::main]
 /// async fn main() {
-///     let mut delay = time::delay_for(Duration::from_millis(50));
+///     let sleep = time::sleep(Duration::from_millis(50));
+///     tokio::pin!(sleep);
 ///
-///     while !delay.is_elapsed() {
+///     while !sleep.is_elapsed() {
 ///         tokio::select! {
-///             _ = &mut delay, if !delay.is_elapsed() => {
+///             _ = &mut sleep, if !sleep.is_elapsed() => {
 ///                 println!("operation timed out");
 ///             }
 ///             _ = some_async_work() => {
@@ -91,11 +92,11 @@
 /// }
 /// ```
 ///
-/// In the above example, `delay.is_elapsed()` may return `true` even if
-/// `delay.poll()` never returned `Ready`. This opens up a potential race
-/// condition where `delay` expires between the `while !delay.is_elapsed()`
+/// In the above example, `sleep.is_elapsed()` may return `true` even if
+/// `sleep.poll()` never returned `Ready`. This opens up a potential race
+/// condition where `sleep` expires between the `while !sleep.is_elapsed()`
 /// check and the call to `select!` resulting in the `some_async_work()` call to
-/// run uninterrupted despite the delay having elapsed.
+/// run uninterrupted despite the sleep having elapsed.
 ///
 /// One way to write the above example without the race would be:
 ///
@@ -103,17 +104,18 @@
 /// use tokio::time::{self, Duration};
 ///
 /// async fn some_async_work() {
-/// # time::delay_for(Duration::from_millis(10)).await;
+/// # time::sleep(Duration::from_millis(10)).await;
 ///     // do work
 /// }
 ///
 /// #[tokio::main]
 /// async fn main() {
-///     let mut delay = time::delay_for(Duration::from_millis(50));
+///     let sleep = time::sleep(Duration::from_millis(50));
+///     tokio::pin!(sleep);
 ///
 ///     loop {
 ///         tokio::select! {
-///             _ = &mut delay => {
+///             _ = &mut sleep => {
 ///                 println!("operation timed out");
 ///                 break;
 ///             }
@@ -167,7 +169,7 @@
 /// Basic stream selecting.
 ///
 /// ```
-/// use tokio::stream::{self, StreamExt};
+/// use tokio_stream::{self as stream, StreamExt};
 ///
 /// #[tokio::main]
 /// async fn main() {
@@ -188,7 +190,7 @@
 /// is complete, all calls to `next()` return `None`.
 ///
 /// ```
-/// use tokio::stream::{self, StreamExt};
+/// use tokio_stream::{self as stream, StreamExt};
 ///
 /// #[tokio::main]
 /// async fn main() {
@@ -210,7 +212,7 @@
 /// }
 /// ```
 ///
-/// Using the same future in multiple select! expressions can be done by passing
+/// Using the same future in multiple `select!` expressions can be done by passing
 /// a reference to the future. Doing so requires the future to be [`Unpin`]. A
 /// future can be made [`Unpin`] by either using [`Box::pin`] or stack pinning.
 ///
@@ -220,13 +222,14 @@
 /// Here, a stream is consumed for at most 1 second.
 ///
 /// ```
-/// use tokio::stream::{self, StreamExt};
+/// use tokio_stream::{self as stream, StreamExt};
 /// use tokio::time::{self, Duration};
 ///
 /// #[tokio::main]
 /// async fn main() {
 ///     let mut stream = stream::iter(vec![1, 2, 3]);
-///     let mut delay = time::delay_for(Duration::from_secs(1));
+///     let sleep = time::sleep(Duration::from_secs(1));
+///     tokio::pin!(sleep);
 ///
 ///     loop {
 ///         tokio::select! {
@@ -237,7 +240,7 @@
 ///                     break;
 ///                 }
 ///             }
-///             _ = &mut delay => {
+///             _ = &mut sleep => {
 ///                 println!("timeout");
 ///                 break;
 ///             }
@@ -359,10 +362,14 @@ macro_rules! select {
                 let start = $crate::macros::support::thread_rng_n(BRANCHES);
 
                 for i in 0..BRANCHES {
-                    let branch = (start + i) % BRANCHES;
-
+                    let branch;
+                    #[allow(clippy::modulo_one)]
+                    {
+                        branch = (start + i) % BRANCHES;
+                    }
                     match branch {
                         $(
+                            #[allow(unreachable_code)]
                             $crate::count!( $($skip)* ) => {
                                 // First, if the future has previously been
                                 // disabled, do not poll it again. This is done
@@ -400,6 +407,7 @@ macro_rules! select {
                                 // The future returned a value, check if matches
                                 // the specified pattern.
                                 #[allow(unused_variables)]
+                                #[allow(unused_mut)]
                                 match &out {
                                     $bind => {}
                                     _ => continue,
@@ -438,7 +446,7 @@ macro_rules! select {
 
     (@ { $($t:tt)* } ) => {
         // No `else` branch
-        $crate::select!(@{ $($t)*; unreachable!() })
+        $crate::select!(@{ $($t)*; panic!("all branches are disabled and there is no else branch") })
     };
     (@ { $($t:tt)* } else => $else:expr $(,)?) => {
         $crate::select!(@{ $($t)*; $else })

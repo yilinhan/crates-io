@@ -2,7 +2,7 @@
 
 //! A channel for sending a single message between asynchronous tasks.
 
-use crate::loom::cell::CausalCell;
+use crate::loom::cell::UnsafeCell;
 use crate::loom::sync::atomic::AtomicUsize;
 use crate::loom::sync::Arc;
 
@@ -16,7 +16,7 @@ use std::task::{Context, Poll, Waker};
 
 /// Sends a value to the associated `Receiver`.
 ///
-/// Instances are created by the [`channel`](fn.channel.html) function.
+/// Instances are created by the [`channel`](fn@channel) function.
 #[derive(Debug)]
 pub struct Sender<T> {
     inner: Option<Arc<Inner<T>>>,
@@ -24,7 +24,7 @@ pub struct Sender<T> {
 
 /// Receive a value from the associated `Sender`.
 ///
-/// Instances are created by the [`channel`](fn.channel.html) function.
+/// Instances are created by the [`channel`](fn@channel) function.
 #[derive(Debug)]
 pub struct Receiver<T> {
     inner: Option<Arc<Inner<T>>>,
@@ -81,13 +81,13 @@ struct Inner<T> {
 
     /// The value. This is set by `Sender` and read by `Receiver`. The state of
     /// the cell is tracked by `state`.
-    value: CausalCell<Option<T>>,
+    value: UnsafeCell<Option<T>>,
 
     /// The task to notify when the receiver drops without consuming the value.
-    tx_task: CausalCell<MaybeUninit<Waker>>,
+    tx_task: UnsafeCell<MaybeUninit<Waker>>,
 
     /// The task to notify when the value is sent.
-    rx_task: CausalCell<MaybeUninit<Waker>>,
+    rx_task: UnsafeCell<MaybeUninit<Waker>>,
 }
 
 #[derive(Clone, Copy)]
@@ -124,12 +124,11 @@ struct State(usize);
 /// }
 /// ```
 pub fn channel<T>() -> (Sender<T>, Receiver<T>) {
-    #[allow(deprecated)]
     let inner = Arc::new(Inner {
         state: AtomicUsize::new(State::new().as_usize()),
-        value: CausalCell::new(None),
-        tx_task: CausalCell::new(MaybeUninit::uninit()),
-        rx_task: CausalCell::new(MaybeUninit::uninit()),
+        value: UnsafeCell::new(None),
+        tx_task: UnsafeCell::new(MaybeUninit::uninit()),
+        rx_task: UnsafeCell::new(MaybeUninit::uninit()),
     });
 
     let tx = Sender {
@@ -144,8 +143,11 @@ impl<T> Sender<T> {
     /// Attempts to send a value on this channel, returning it back if it could
     /// not be sent.
     ///
-    /// The function consumes `self` as only one value may ever be sent on a
-    /// one-shot channel.
+    /// This method consumes `self` as only one value may ever be sent on a oneshot
+    /// channel. It is not marked async because sending a message to an oneshot
+    /// channel never requires any form of waiting.  Because of this, the `send`
+    /// method can be used in both synchronous and asynchronous code without
+    /// problems.
     ///
     /// A successful send occurs when it is determined that the other end of the
     /// channel has not hung up already. An unsuccessful send would be one where
@@ -194,49 +196,6 @@ impl<T> Sender<T> {
         Ok(())
     }
 
-    #[doc(hidden)] // TODO: remove
-    pub fn poll_closed(&mut self, cx: &mut Context<'_>) -> Poll<()> {
-        let inner = self.inner.as_ref().unwrap();
-
-        let mut state = State::load(&inner.state, Acquire);
-
-        if state.is_closed() {
-            return Poll::Ready(());
-        }
-
-        if state.is_tx_task_set() {
-            let will_notify = unsafe { inner.with_tx_task(|w| w.will_wake(cx.waker())) };
-
-            if !will_notify {
-                state = State::unset_tx_task(&inner.state);
-
-                if state.is_closed() {
-                    // Set the flag again so that the waker is released in drop
-                    State::set_tx_task(&inner.state);
-                    return Ready(());
-                } else {
-                    unsafe { inner.drop_tx_task() };
-                }
-            }
-        }
-
-        if !state.is_tx_task_set() {
-            // Attempt to set the task
-            unsafe {
-                inner.set_tx_task(cx);
-            }
-
-            // Update the state
-            state = State::set_tx_task(&inner.state);
-
-            if state.is_closed() {
-                return Ready(());
-            }
-        }
-
-        Pending
-    }
-
     /// Waits for the associated [`Receiver`] handle to close.
     ///
     /// A [`Receiver`] is closed by either calling [`close`] explicitly or the
@@ -278,8 +237,6 @@ impl<T> Sender<T> {
     /// use tokio::sync::oneshot;
     /// use tokio::time::{self, Duration};
     ///
-    /// use futures::{select, FutureExt};
-    ///
     /// async fn compute() -> String {
     ///     // Complex computation returning a `String`
     /// # "hello".to_string()
@@ -290,12 +247,14 @@ impl<T> Sender<T> {
     ///     let (mut tx, rx) = oneshot::channel();
     ///
     ///     tokio::spawn(async move {
-    ///         select! {
-    ///             _ = tx.closed().fuse() => {
+    ///         tokio::select! {
+    ///             _ = tx.closed() => {
     ///                 // The receiver dropped, no need to do any further work
     ///             }
-    ///             value = compute().fuse() => {
-    ///                 tx.send(value).unwrap()
+    ///             value = compute() => {
+    ///                 // The send can fail if the channel was closed at the exact same
+    ///                 // time as when compute() finished, so just ignore the failure.
+    ///                 let _ = tx.send(value);
     ///             }
     ///         }
     ///     });
@@ -343,6 +302,94 @@ impl<T> Sender<T> {
         let state = State::load(&inner.state, Acquire);
         state.is_closed()
     }
+
+    /// Check whether the oneshot channel has been closed, and if not, schedules the
+    /// `Waker` in the provided `Context` to receive a notification when the channel is
+    /// closed.
+    ///
+    /// A [`Receiver`] is closed by either calling [`close`] explicitly, or when the
+    /// [`Receiver`] value is dropped.
+    ///
+    /// Note that on multiple calls to poll, only the `Waker` from the `Context` passed
+    /// to the most recent call will be scheduled to receive a wakeup.
+    ///
+    /// [`Receiver`]: struct@crate::sync::oneshot::Receiver
+    /// [`close`]: fn@crate::sync::oneshot::Receiver::close
+    ///
+    /// # Return value
+    ///
+    /// This function returns:
+    ///
+    ///  * `Poll::Pending` if the channel is still open.
+    ///  * `Poll::Ready(())` if the channel is closed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use tokio::sync::oneshot;
+    ///
+    /// use futures::future::poll_fn;
+    ///
+    /// #[tokio::main]
+    /// async fn main() {
+    ///     let (mut tx, mut rx) = oneshot::channel::<()>();
+    ///
+    ///     tokio::spawn(async move {
+    ///         rx.close();
+    ///     });
+    ///
+    ///     poll_fn(|cx| tx.poll_closed(cx)).await;
+    ///
+    ///     println!("the receiver dropped");
+    /// }
+    /// ```
+    pub fn poll_closed(&mut self, cx: &mut Context<'_>) -> Poll<()> {
+        // Keep track of task budget
+        let coop = ready!(crate::coop::poll_proceed(cx));
+
+        let inner = self.inner.as_ref().unwrap();
+
+        let mut state = State::load(&inner.state, Acquire);
+
+        if state.is_closed() {
+            coop.made_progress();
+            return Poll::Ready(());
+        }
+
+        if state.is_tx_task_set() {
+            let will_notify = unsafe { inner.with_tx_task(|w| w.will_wake(cx.waker())) };
+
+            if !will_notify {
+                state = State::unset_tx_task(&inner.state);
+
+                if state.is_closed() {
+                    // Set the flag again so that the waker is released in drop
+                    State::set_tx_task(&inner.state);
+                    coop.made_progress();
+                    return Ready(());
+                } else {
+                    unsafe { inner.drop_tx_task() };
+                }
+            }
+        }
+
+        if !state.is_tx_task_set() {
+            // Attempt to set the task
+            unsafe {
+                inner.set_tx_task(cx);
+            }
+
+            // Update the state
+            state = State::set_tx_task(&inner.state);
+
+            if state.is_closed() {
+                coop.made_progress();
+                return Ready(());
+            }
+        }
+
+        Pending
+    }
 }
 
 impl<T> Drop for Sender<T> {
@@ -357,7 +404,7 @@ impl<T> Receiver<T> {
     /// Prevents the associated [`Sender`] handle from sending a value.
     ///
     /// Any `send` operation which happens after calling `close` is guaranteed
-    /// to fail. After calling `close`, `Receiver::poll`] should be called to
+    /// to fail. After calling `close`, [`try_recv`] should be called to
     /// receive a value if one was sent **before** the call to `close`
     /// completed.
     ///
@@ -365,6 +412,7 @@ impl<T> Receiver<T> {
     /// value will not be sent into the channel and never received.
     ///
     /// [`Sender`]: Sender
+    /// [`try_recv`]: Receiver::try_recv
     ///
     /// # Examples
     ///
@@ -544,15 +592,20 @@ impl<T> Inner<T> {
     }
 
     fn poll_recv(&self, cx: &mut Context<'_>) -> Poll<Result<T, RecvError>> {
+        // Keep track of task budget
+        let coop = ready!(crate::coop::poll_proceed(cx));
+
         // Load the state
         let mut state = State::load(&self.state, Acquire);
 
         if state.is_complete() {
+            coop.made_progress();
             match unsafe { self.consume_value() } {
                 Some(value) => Ready(Ok(value)),
                 None => Ready(Err(RecvError(()))),
             }
         } else if state.is_closed() {
+            coop.made_progress();
             Ready(Err(RecvError(())))
         } else {
             if state.is_rx_task_set() {
@@ -566,6 +619,7 @@ impl<T> Inner<T> {
                         // Set the flag again so that the waker is released in drop
                         State::set_rx_task(&self.state);
 
+                        coop.made_progress();
                         return match unsafe { self.consume_value() } {
                             Some(value) => Ready(Ok(value)),
                             None => Ready(Err(RecvError(()))),
@@ -586,6 +640,7 @@ impl<T> Inner<T> {
                 state = State::set_rx_task(&self.state);
 
                 if state.is_complete() {
+                    coop.made_progress();
                     match unsafe { self.consume_value() } {
                         Some(value) => Ready(Ok(value)),
                         None => Ready(Err(RecvError(()))),
@@ -669,7 +724,7 @@ unsafe impl<T: Send> Sync for Inner<T> {}
 
 impl<T> Drop for Inner<T> {
     fn drop(&mut self) {
-        let state = State(*self.state.get_mut());
+        let state = State(self.state.with_mut(|v| *v));
 
         if state.is_rx_task_set() {
             unsafe {

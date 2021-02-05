@@ -1,83 +1,132 @@
 #![allow(clippy::redundant_clone)]
 
-use crate::park::Park;
-use crate::runtime::enter;
-use crate::runtime::time;
+use crate::future::poll_fn;
+use crate::park::{Park, Unpark};
+use crate::runtime::driver::Driver;
+use crate::sync::Notify;
+use crate::util::{waker_ref, Wake};
 
-use std::future::Future;
-use std::mem::ManuallyDrop;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::Poll::Ready;
-use std::task::{Context, RawWaker, RawWakerVTable, Waker};
+use std::sync::{Arc, Mutex};
+use std::task::Context;
+use std::task::Poll::{Pending, Ready};
+use std::{future::Future, sync::PoisonError};
 
 #[derive(Debug)]
 pub(super) struct Shell {
-    driver: time::Driver,
+    driver: Mutex<Option<Driver>>,
+
+    notify: Notify,
 
     /// TODO: don't store this
-    waker: Waker,
+    unpark: Arc<Handle>,
 }
 
-type Handle = <time::Driver as Park>::Unpark;
+#[derive(Debug)]
+struct Handle(<Driver as Park>::Unpark);
 
 impl Shell {
-    pub(super) fn new(driver: time::Driver) -> Shell {
-        // Make sure we don't mess up types (as we do casts later)
-        let unpark: Arc<Handle> = Arc::new(driver.unpark());
+    pub(super) fn new(driver: Driver) -> Shell {
+        let unpark = Arc::new(Handle(driver.unpark()));
 
-        let raw_waker = RawWaker::new(
-            Arc::into_raw(unpark) as *const Handle as *const (),
-            &RawWakerVTable::new(clone_waker, wake, wake_by_ref, drop_waker),
-        );
-
-        let waker = unsafe { Waker::from_raw(raw_waker) };
-
-        Shell { driver, waker }
+        Shell {
+            driver: Mutex::new(Some(driver)),
+            notify: Notify::new(),
+            unpark,
+        }
     }
 
-    pub(super) fn block_on<F>(&mut self, mut f: F) -> F::Output
+    pub(super) fn block_on<F>(&self, f: F) -> F::Output
     where
         F: Future,
     {
-        let _e = enter();
+        let mut enter = crate::runtime::enter(true);
 
-        let mut f = unsafe { Pin::new_unchecked(&mut f) };
-        let mut cx = Context::from_waker(&self.waker);
+        pin!(f);
 
         loop {
-            if let Ready(v) = f.as_mut().poll(&mut cx) {
+            if let Some(driver) = &mut self.take_driver() {
+                return driver.block_on(f);
+            } else {
+                let notified = self.notify.notified();
+                pin!(notified);
+
+                if let Some(out) = enter
+                    .block_on(poll_fn(|cx| {
+                        if notified.as_mut().poll(cx).is_ready() {
+                            return Ready(None);
+                        }
+
+                        if let Ready(out) = f.as_mut().poll(cx) {
+                            return Ready(Some(out));
+                        }
+
+                        Pending
+                    }))
+                    .expect("Failed to `Enter::block_on`")
+                {
+                    return out;
+                }
+            }
+        }
+    }
+
+    fn take_driver(&self) -> Option<DriverGuard<'_>> {
+        let mut lock = self.driver.lock().unwrap();
+        let driver = lock.take()?;
+
+        Some(DriverGuard {
+            inner: Some(driver),
+            shell: &self,
+        })
+    }
+}
+
+impl Wake for Handle {
+    /// Wake by value
+    fn wake(self: Arc<Self>) {
+        Wake::wake_by_ref(&self);
+    }
+
+    /// Wake by reference
+    fn wake_by_ref(arc_self: &Arc<Self>) {
+        arc_self.0.unpark();
+    }
+}
+
+struct DriverGuard<'a> {
+    inner: Option<Driver>,
+    shell: &'a Shell,
+}
+
+impl DriverGuard<'_> {
+    fn block_on<F: Future>(&mut self, f: F) -> F::Output {
+        let driver = self.inner.as_mut().unwrap();
+
+        pin!(f);
+
+        let waker = waker_ref(&self.shell.unpark);
+        let mut cx = Context::from_waker(&waker);
+
+        loop {
+            if let Ready(v) = crate::coop::budget(|| f.as_mut().poll(&mut cx)) {
                 return v;
             }
 
-            self.driver.park().unwrap();
+            driver.park().unwrap();
         }
     }
 }
 
-fn clone_waker(ptr: *const ()) -> RawWaker {
-    let w1 = unsafe { ManuallyDrop::new(Arc::from_raw(ptr as *const Handle)) };
-    let _w2 = ManuallyDrop::new(w1.clone());
+impl Drop for DriverGuard<'_> {
+    fn drop(&mut self) {
+        if let Some(inner) = self.inner.take() {
+            self.shell
+                .driver
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .replace(inner);
 
-    RawWaker::new(
-        ptr,
-        &RawWakerVTable::new(clone_waker, wake, wake_by_ref, drop_waker),
-    )
-}
-
-fn wake(ptr: *const ()) {
-    use crate::park::Unpark;
-    let unpark = unsafe { Arc::from_raw(ptr as *const Handle) };
-    (unpark).unpark()
-}
-
-fn wake_by_ref(ptr: *const ()) {
-    use crate::park::Unpark;
-
-    let unpark = ptr as *const Handle;
-    unsafe { (*unpark).unpark() }
-}
-
-fn drop_waker(ptr: *const ()) {
-    let _ = unsafe { Arc::from_raw(ptr as *const Handle) };
+            self.shell.notify.notify_one();
+        }
+    }
 }

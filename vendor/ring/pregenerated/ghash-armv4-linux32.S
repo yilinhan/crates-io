@@ -28,7 +28,6 @@
 #else
 .code	32
 #endif
-
 #if __ARM_MAX_ARCH__>=7
 .arch	armv7-a
 .fpu	neon

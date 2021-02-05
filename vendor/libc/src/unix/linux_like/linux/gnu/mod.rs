@@ -2,6 +2,7 @@ pub type pthread_t = c_ulong;
 pub type __priority_which_t = ::c_uint;
 pub type __rlimit_resource_t = ::c_uint;
 pub type Lmid_t = ::c_long;
+pub type regoff_t = ::c_int;
 
 s! {
     pub struct statx {
@@ -273,6 +274,17 @@ s! {
         pub __glibc_reserved3: ::c_long,
         pub __glibc_reserved4: ::c_long,
     }
+
+    pub struct regex_t {
+        __buffer: *mut ::c_void,
+        __allocated: ::size_t,
+        __used: ::size_t,
+        __syntax: ::c_ulong,
+        __fastmap: *mut ::c_char,
+        __translate: *mut ::c_char,
+        __re_nsub: ::size_t,
+        __bitfield: u8,
+    }
 }
 
 impl siginfo_t {
@@ -298,6 +310,68 @@ impl siginfo_t {
             si_sigval: ::sigval,
         }
         (*(self as *const siginfo_t as *const siginfo_timer)).si_sigval
+    }
+}
+
+cfg_if! {
+    if #[cfg(libc_union)] {
+        // Internal, for casts to access union fields
+        #[repr(C)]
+        struct sifields_sigchld {
+            si_pid: ::pid_t,
+            si_uid: ::uid_t,
+            si_status: ::c_int,
+            si_utime: ::c_long,
+            si_stime: ::c_long,
+        }
+        impl ::Copy for sifields_sigchld {}
+        impl ::Clone for sifields_sigchld {
+            fn clone(&self) -> sifields_sigchld {
+                *self
+            }
+        }
+
+        // Internal, for casts to access union fields
+        #[repr(C)]
+        union sifields {
+            _align_pointer: *mut ::c_void,
+            sigchld: sifields_sigchld,
+        }
+
+        // Internal, for casts to access union fields. Note that some variants
+        // of sifields start with a pointer, which makes the alignment of
+        // sifields vary on 32-bit and 64-bit architectures.
+        #[repr(C)]
+        struct siginfo_f {
+            _siginfo_base: [::c_int; 3],
+            sifields: sifields,
+        }
+
+        impl siginfo_t {
+            unsafe fn sifields(&self) -> &sifields {
+                &(*(self as *const siginfo_t as *const siginfo_f)).sifields
+            }
+
+            pub unsafe fn si_pid(&self) -> ::pid_t {
+                self.sifields().sigchld.si_pid
+            }
+
+            pub unsafe fn si_uid(&self) -> ::uid_t {
+                self.sifields().sigchld.si_uid
+            }
+
+            pub unsafe fn si_status(&self) -> ::c_int {
+                self.sifields().sigchld.si_status
+            }
+
+            pub unsafe fn si_utime(&self) -> ::c_long {
+                self.sifields().sigchld.si_utime
+            }
+
+            pub unsafe fn si_stime(&self) -> ::c_long {
+                self.sifields().sigchld.si_stime
+            }
+        }
     }
 }
 
@@ -399,6 +473,47 @@ cfg_if! {
     }
 }
 
+// include/uapi/asm-generic/hugetlb_encode.h
+pub const HUGETLB_FLAG_ENCODE_SHIFT: ::c_int = 26;
+pub const HUGETLB_FLAG_ENCODE_MASK: ::c_int = 0x3f;
+
+pub const HUGETLB_FLAG_ENCODE_64KB: ::c_int = 16 << HUGETLB_FLAG_ENCODE_SHIFT;
+pub const HUGETLB_FLAG_ENCODE_512KB: ::c_int = 19 << HUGETLB_FLAG_ENCODE_SHIFT;
+pub const HUGETLB_FLAG_ENCODE_1MB: ::c_int = 20 << HUGETLB_FLAG_ENCODE_SHIFT;
+pub const HUGETLB_FLAG_ENCODE_2MB: ::c_int = 21 << HUGETLB_FLAG_ENCODE_SHIFT;
+pub const HUGETLB_FLAG_ENCODE_8MB: ::c_int = 23 << HUGETLB_FLAG_ENCODE_SHIFT;
+pub const HUGETLB_FLAG_ENCODE_16MB: ::c_int = 24 << HUGETLB_FLAG_ENCODE_SHIFT;
+pub const HUGETLB_FLAG_ENCODE_32MB: ::c_int = 25 << HUGETLB_FLAG_ENCODE_SHIFT;
+pub const HUGETLB_FLAG_ENCODE_256MB: ::c_int = 28 << HUGETLB_FLAG_ENCODE_SHIFT;
+pub const HUGETLB_FLAG_ENCODE_512MB: ::c_int = 29 << HUGETLB_FLAG_ENCODE_SHIFT;
+pub const HUGETLB_FLAG_ENCODE_1GB: ::c_int = 30 << HUGETLB_FLAG_ENCODE_SHIFT;
+pub const HUGETLB_FLAG_ENCODE_2GB: ::c_int = 31 << HUGETLB_FLAG_ENCODE_SHIFT;
+pub const HUGETLB_FLAG_ENCODE_16GB: ::c_int = 34 << HUGETLB_FLAG_ENCODE_SHIFT;
+
+// include/uapi/linux/mman.h
+/*
+ * Huge page size encoding when MAP_HUGETLB is specified, and a huge page
+ * size other than the default is desired.  See hugetlb_encode.h.
+ * All known huge page size encodings are provided here.  It is the
+ * responsibility of the application to know which sizes are supported on
+ * the running system.  See mmap(2) man page for details.
+ */
+pub const MAP_HUGE_SHIFT: ::c_int = HUGETLB_FLAG_ENCODE_SHIFT;
+pub const MAP_HUGE_MASK: ::c_int = HUGETLB_FLAG_ENCODE_MASK;
+
+pub const MAP_HUGE_64KB: ::c_int = HUGETLB_FLAG_ENCODE_64KB;
+pub const MAP_HUGE_512KB: ::c_int = HUGETLB_FLAG_ENCODE_512KB;
+pub const MAP_HUGE_1MB: ::c_int = HUGETLB_FLAG_ENCODE_1MB;
+pub const MAP_HUGE_2MB: ::c_int = HUGETLB_FLAG_ENCODE_2MB;
+pub const MAP_HUGE_8MB: ::c_int = HUGETLB_FLAG_ENCODE_8MB;
+pub const MAP_HUGE_16MB: ::c_int = HUGETLB_FLAG_ENCODE_16MB;
+pub const MAP_HUGE_32MB: ::c_int = HUGETLB_FLAG_ENCODE_32MB;
+pub const MAP_HUGE_256MB: ::c_int = HUGETLB_FLAG_ENCODE_256MB;
+pub const MAP_HUGE_512MB: ::c_int = HUGETLB_FLAG_ENCODE_512MB;
+pub const MAP_HUGE_1GB: ::c_int = HUGETLB_FLAG_ENCODE_1GB;
+pub const MAP_HUGE_2GB: ::c_int = HUGETLB_FLAG_ENCODE_2GB;
+pub const MAP_HUGE_16GB: ::c_int = HUGETLB_FLAG_ENCODE_16GB;
+
 pub const RLIMIT_CPU: ::__rlimit_resource_t = 0;
 pub const RLIMIT_FSIZE: ::__rlimit_resource_t = 1;
 pub const RLIMIT_DATA: ::__rlimit_resource_t = 2;
@@ -411,6 +526,10 @@ pub const RLIMIT_NICE: ::__rlimit_resource_t = 13;
 pub const RLIMIT_RTPRIO: ::__rlimit_resource_t = 14;
 pub const RLIMIT_RTTIME: ::__rlimit_resource_t = 15;
 pub const RLIMIT_NLIMITS: ::__rlimit_resource_t = 16;
+
+pub const PRIO_PROCESS: ::__priority_which_t = 0;
+pub const PRIO_PGRP: ::__priority_which_t = 1;
+pub const PRIO_USER: ::__priority_which_t = 2;
 
 pub const MS_RMT_MASK: ::c_ulong = 0x02800051;
 
@@ -605,34 +724,111 @@ pub const O_ACCMODE: ::c_int = 3;
 pub const ST_RELATIME: ::c_ulong = 4096;
 pub const NI_MAXHOST: ::socklen_t = 1025;
 
-pub const ADFS_SUPER_MAGIC: ::c_long = 0x0000adf5;
-pub const AFFS_SUPER_MAGIC: ::c_long = 0x0000adff;
-pub const CODA_SUPER_MAGIC: ::c_long = 0x73757245;
-pub const CRAMFS_MAGIC: ::c_long = 0x28cd3d45;
-pub const EFS_SUPER_MAGIC: ::c_long = 0x00414a53;
-pub const EXT2_SUPER_MAGIC: ::c_long = 0x0000ef53;
-pub const EXT3_SUPER_MAGIC: ::c_long = 0x0000ef53;
-pub const EXT4_SUPER_MAGIC: ::c_long = 0x0000ef53;
-pub const HPFS_SUPER_MAGIC: ::c_long = 0xf995e849;
-pub const HUGETLBFS_MAGIC: ::c_long = 0x958458f6;
-pub const ISOFS_SUPER_MAGIC: ::c_long = 0x00009660;
-pub const JFFS2_SUPER_MAGIC: ::c_long = 0x000072b6;
-pub const MINIX_SUPER_MAGIC: ::c_long = 0x0000137f;
-pub const MINIX_SUPER_MAGIC2: ::c_long = 0x0000138f;
-pub const MINIX2_SUPER_MAGIC: ::c_long = 0x00002468;
-pub const MINIX2_SUPER_MAGIC2: ::c_long = 0x00002478;
-pub const MSDOS_SUPER_MAGIC: ::c_long = 0x00004d44;
-pub const NCP_SUPER_MAGIC: ::c_long = 0x0000564c;
-pub const NFS_SUPER_MAGIC: ::c_long = 0x00006969;
-pub const OPENPROM_SUPER_MAGIC: ::c_long = 0x00009fa1;
-pub const PROC_SUPER_MAGIC: ::c_long = 0x00009fa0;
-pub const QNX4_SUPER_MAGIC: ::c_long = 0x0000002f;
-pub const REISERFS_SUPER_MAGIC: ::c_long = 0x52654973;
-pub const SMB_SUPER_MAGIC: ::c_long = 0x0000517b;
-pub const TMPFS_MAGIC: ::c_long = 0x01021994;
-pub const USBDEVICE_SUPER_MAGIC: ::c_long = 0x00009fa2;
-pub const CGROUP_SUPER_MAGIC: ::c_long = 0x27e0eb;
-pub const CGROUP2_SUPER_MAGIC: ::c_long = 0x63677270;
+cfg_if! {
+    if #[cfg(not(target_arch = "s390x"))] {
+        pub const ADFS_SUPER_MAGIC: ::c_long = 0x0000adf5;
+        pub const AFFS_SUPER_MAGIC: ::c_long = 0x0000adff;
+        pub const AFS_SUPER_MAGIC: ::c_long = 0x5346414f;
+        pub const AUTOFS_SUPER_MAGIC: ::c_long = 0x0187;
+        pub const BINDERFS_SUPER_MAGIC: ::c_long = 0x6c6f6f70;
+        pub const BPF_FS_MAGIC: ::c_long = 0xcafe4a11;
+        pub const BTRFS_SUPER_MAGIC: ::c_long = 0x9123683e;
+        pub const CGROUP2_SUPER_MAGIC: ::c_long = 0x63677270;
+        pub const CGROUP_SUPER_MAGIC: ::c_long = 0x27e0eb;
+        pub const CODA_SUPER_MAGIC: ::c_long = 0x73757245;
+        pub const CRAMFS_MAGIC: ::c_long = 0x28cd3d45;
+        pub const DEBUGFS_MAGIC: ::c_long = 0x64626720;
+        pub const DEVPTS_SUPER_MAGIC: ::c_long = 0x1cd1;
+        pub const ECRYPTFS_SUPER_MAGIC: ::c_long = 0xf15f;
+        pub const EFS_SUPER_MAGIC: ::c_long = 0x00414a53;
+        pub const EXT2_SUPER_MAGIC: ::c_long = 0x0000ef53;
+        pub const EXT3_SUPER_MAGIC: ::c_long = 0x0000ef53;
+        pub const EXT4_SUPER_MAGIC: ::c_long = 0x0000ef53;
+        pub const F2FS_SUPER_MAGIC: ::c_long = 0xf2f52010;
+        pub const FUTEXFS_SUPER_MAGIC: ::c_long = 0xbad1dea;
+        pub const HOSTFS_SUPER_MAGIC: ::c_long = 0x00c0ffee;
+        pub const HPFS_SUPER_MAGIC: ::c_long = 0xf995e849;
+        pub const HUGETLBFS_MAGIC: ::c_long = 0x958458f6;
+        pub const ISOFS_SUPER_MAGIC: ::c_long = 0x00009660;
+        pub const JFFS2_SUPER_MAGIC: ::c_long = 0x000072b6;
+        pub const MINIX2_SUPER_MAGIC2: ::c_long = 0x00002478;
+        pub const MINIX2_SUPER_MAGIC: ::c_long = 0x00002468;
+        pub const MINIX3_SUPER_MAGIC: ::c_long = 0x4d5a;
+        pub const MINIX_SUPER_MAGIC2: ::c_long = 0x0000138f;
+        pub const MINIX_SUPER_MAGIC: ::c_long = 0x0000137f;
+        pub const MSDOS_SUPER_MAGIC: ::c_long = 0x00004d44;
+        pub const NCP_SUPER_MAGIC: ::c_long = 0x0000564c;
+        pub const NFS_SUPER_MAGIC: ::c_long = 0x00006969;
+        pub const NILFS_SUPER_MAGIC: ::c_long = 0x3434;
+        pub const OCFS2_SUPER_MAGIC: ::c_long = 0x7461636f;
+        pub const OPENPROM_SUPER_MAGIC: ::c_long = 0x00009fa1;
+        pub const OVERLAYFS_SUPER_MAGIC: ::c_long = 0x794c7630;
+        pub const PROC_SUPER_MAGIC: ::c_long = 0x00009fa0;
+        pub const QNX4_SUPER_MAGIC: ::c_long = 0x0000002f;
+        pub const QNX6_SUPER_MAGIC: ::c_long = 0x68191122;
+        pub const RDTGROUP_SUPER_MAGIC: ::c_long = 0x7655821;
+        pub const REISERFS_SUPER_MAGIC: ::c_long = 0x52654973;
+        pub const SMB_SUPER_MAGIC: ::c_long = 0x0000517b;
+        pub const SYSFS_MAGIC: ::c_long = 0x62656572;
+        pub const TMPFS_MAGIC: ::c_long = 0x01021994;
+        pub const TRACEFS_MAGIC: ::c_long = 0x74726163;
+        pub const UDF_SUPER_MAGIC: ::c_long = 0x15013346;
+        pub const USBDEVICE_SUPER_MAGIC: ::c_long = 0x00009fa2;
+        pub const XENFS_SUPER_MAGIC: ::c_long = 0xabba1974;
+        pub const XFS_SUPER_MAGIC: ::c_long = 0x58465342;
+    } else if #[cfg(target_arch = "s390x")] {
+        pub const ADFS_SUPER_MAGIC: ::c_uint = 0x0000adf5;
+        pub const AFFS_SUPER_MAGIC: ::c_uint = 0x0000adff;
+        pub const AFS_SUPER_MAGIC: ::c_uint = 0x5346414f;
+        pub const AUTOFS_SUPER_MAGIC: ::c_uint = 0x0187;
+        pub const BINDERFS_SUPER_MAGIC: ::c_uint = 0x6c6f6f70;
+        pub const BPF_FS_MAGIC: ::c_uint = 0xcafe4a11;
+        pub const BTRFS_SUPER_MAGIC: ::c_uint = 0x9123683e;
+        pub const CGROUP2_SUPER_MAGIC: ::c_uint = 0x63677270;
+        pub const CGROUP_SUPER_MAGIC: ::c_uint = 0x27e0eb;
+        pub const CODA_SUPER_MAGIC: ::c_uint = 0x73757245;
+        pub const CRAMFS_MAGIC: ::c_uint = 0x28cd3d45;
+        pub const DEBUGFS_MAGIC: ::c_uint = 0x64626720;
+        pub const DEVPTS_SUPER_MAGIC: ::c_uint = 0x1cd1;
+        pub const ECRYPTFS_SUPER_MAGIC: ::c_uint = 0xf15f;
+        pub const EFS_SUPER_MAGIC: ::c_uint = 0x00414a53;
+        pub const EXT2_SUPER_MAGIC: ::c_uint = 0x0000ef53;
+        pub const EXT3_SUPER_MAGIC: ::c_uint = 0x0000ef53;
+        pub const EXT4_SUPER_MAGIC: ::c_uint = 0x0000ef53;
+        pub const F2FS_SUPER_MAGIC: ::c_uint = 0xf2f52010;
+        pub const FUTEXFS_SUPER_MAGIC: ::c_uint = 0xbad1dea;
+        pub const HOSTFS_SUPER_MAGIC: ::c_uint = 0x00c0ffee;
+        pub const HPFS_SUPER_MAGIC: ::c_uint = 0xf995e849;
+        pub const HUGETLBFS_MAGIC: ::c_uint = 0x958458f6;
+        pub const ISOFS_SUPER_MAGIC: ::c_uint = 0x00009660;
+        pub const JFFS2_SUPER_MAGIC: ::c_uint = 0x000072b6;
+        pub const MINIX2_SUPER_MAGIC2: ::c_uint = 0x00002478;
+        pub const MINIX2_SUPER_MAGIC: ::c_uint = 0x00002468;
+        pub const MINIX3_SUPER_MAGIC: ::c_uint = 0x4d5a;
+        pub const MINIX_SUPER_MAGIC2: ::c_uint = 0x0000138f;
+        pub const MINIX_SUPER_MAGIC: ::c_uint = 0x0000137f;
+        pub const MSDOS_SUPER_MAGIC: ::c_uint = 0x00004d44;
+        pub const NCP_SUPER_MAGIC: ::c_uint = 0x0000564c;
+        pub const NFS_SUPER_MAGIC: ::c_uint = 0x00006969;
+        pub const NILFS_SUPER_MAGIC: ::c_uint = 0x3434;
+        pub const OCFS2_SUPER_MAGIC: ::c_uint = 0x7461636f;
+        pub const OPENPROM_SUPER_MAGIC: ::c_uint = 0x00009fa1;
+        pub const OVERLAYFS_SUPER_MAGIC: ::c_uint = 0x794c7630;
+        pub const PROC_SUPER_MAGIC: ::c_uint = 0x00009fa0;
+        pub const QNX4_SUPER_MAGIC: ::c_uint = 0x0000002f;
+        pub const QNX6_SUPER_MAGIC: ::c_uint = 0x68191122;
+        pub const RDTGROUP_SUPER_MAGIC: ::c_uint = 0x7655821;
+        pub const REISERFS_SUPER_MAGIC: ::c_uint = 0x52654973;
+        pub const SMB_SUPER_MAGIC: ::c_uint = 0x0000517b;
+        pub const SYSFS_MAGIC: ::c_uint = 0x62656572;
+        pub const TMPFS_MAGIC: ::c_uint = 0x01021994;
+        pub const TRACEFS_MAGIC: ::c_uint = 0x74726163;
+        pub const UDF_SUPER_MAGIC: ::c_uint = 0x15013346;
+        pub const USBDEVICE_SUPER_MAGIC: ::c_uint = 0x00009fa2;
+        pub const XENFS_SUPER_MAGIC: ::c_uint = 0xabba1974;
+        pub const XFS_SUPER_MAGIC: ::c_uint = 0x58465342;
+    }
+}
 
 pub const CPU_SETSIZE: ::c_int = 0x400;
 
@@ -695,6 +891,10 @@ pub const NTF_OFFLOADED: u8 = 0x20;
 pub const NDA_MASTER: ::c_ushort = 9;
 pub const NDA_LINK_NETNSID: ::c_ushort = 10;
 pub const NDA_SRC_VNI: ::c_ushort = 11;
+
+// linux/personality.h
+pub const UNAME26: ::c_int = 0x0020000;
+pub const FDPIC_FUNCPTRS: ::c_int = 0x0080000;
 
 // linux/if_addr.h
 pub const IFA_FLAGS: ::c_ushort = 8;
@@ -1072,7 +1272,8 @@ cfg_if! {
         target_arch = "x86",
         target_arch = "x86_64",
         target_arch = "s390x",
-        target_arch = "riscv64"
+        target_arch = "riscv64",
+        target_arch = "riscv32"
     ))] {
         pub const PTHREAD_STACK_MIN: ::size_t = 16384;
     } else if #[cfg(any(
@@ -1085,6 +1286,12 @@ cfg_if! {
     }
 }
 pub const PTHREAD_MUTEX_ADAPTIVE_NP: ::c_int = 3;
+
+pub const REG_STARTEND: ::c_int = 4;
+
+pub const REG_EEND: ::c_int = 14;
+pub const REG_ESIZE: ::c_int = 15;
+pub const REG_ERPAREN: ::c_int = 16;
 
 extern "C" {
     pub fn fgetspent_r(
@@ -1198,9 +1405,23 @@ extern "C" {
     pub fn ntp_adjtime(buf: *mut timex) -> ::c_int;
     #[link_name = "ntp_gettimex"]
     pub fn ntp_gettime(buf: *mut ntptimeval) -> ::c_int;
+    pub fn copy_file_range(
+        fd_in: ::c_int,
+        off_in: *mut ::off64_t,
+        fd_out: ::c_int,
+        off_out: *mut ::off64_t,
+        len: ::size_t,
+        flags: ::c_uint,
+    ) -> ::ssize_t;
+    pub fn fanotify_mark(
+        fd: ::c_int,
+        flags: ::c_uint,
+        mask: u64,
+        dirfd: ::c_int,
+        path: *const ::c_char,
+    ) -> ::c_int;
 }
 
-#[link(name = "util")]
 extern "C" {
     pub fn ioctl(fd: ::c_int, request: ::c_ulong, ...) -> ::c_int;
     pub fn backtrace(buf: *mut *mut ::c_void, sz: ::c_int) -> ::c_int;
@@ -1251,16 +1472,12 @@ extern "C" {
     pub fn sched_getcpu() -> ::c_int;
     pub fn mallinfo() -> ::mallinfo;
     pub fn malloc_usable_size(ptr: *mut ::c_void) -> ::size_t;
-    #[cfg_attr(target_os = "netbsd", link_name = "__getpwent_r50")]
-    #[cfg_attr(target_os = "solaris", link_name = "__posix_getpwent_r")]
     pub fn getpwent_r(
         pwd: *mut ::passwd,
         buf: *mut ::c_char,
         buflen: ::size_t,
         result: *mut *mut ::passwd,
     ) -> ::c_int;
-    #[cfg_attr(target_os = "netbsd", link_name = "__getgrent_r50")]
-    #[cfg_attr(target_os = "solaris", link_name = "__posix_getgrent_r")]
     pub fn getgrent_r(
         grp: *mut ::group,
         buf: *mut ::c_char,
@@ -1278,7 +1495,6 @@ extern "C" {
     ) -> ::c_int;
 }
 
-#[link(name = "dl")]
 extern "C" {
     pub fn dlmopen(
         lmid: Lmid_t,
@@ -1297,7 +1513,8 @@ cfg_if! {
                  target_arch = "arm",
                  target_arch = "mips",
                  target_arch = "powerpc",
-                 target_arch = "sparc"))] {
+                 target_arch = "sparc",
+                 target_arch = "riscv32"))] {
         mod b32;
         pub use self::b32::*;
     } else if #[cfg(any(target_arch = "x86_64",

@@ -4,7 +4,7 @@ use tempfile::tempfile;
 use nix::{Error, fcntl};
 use nix::errno::Errno;
 use nix::pty::openpty;
-use nix::sys::termios::{self, LocalFlags, OutputFlags, Termios, tcgetattr};
+use nix::sys::termios::{self, LocalFlags, OutputFlags, tcgetattr};
 use nix::unistd::{read, write, close};
 
 /// Helper function analogous to `std::io::Write::write_all`, but for `RawFd`s
@@ -19,7 +19,7 @@ fn write_all(f: RawFd, buf: &[u8]) {
 #[test]
 fn test_tcgetattr_pty() {
     // openpty uses ptname(3) internally
-    let _m = ::PTSNAME_MTX.lock().expect("Mutex got poisoned by another test");
+    let _m = crate::PTSNAME_MTX.lock().expect("Mutex got poisoned by another test");
 
     let pty = openpty(None, None).expect("openpty failed");
     assert!(termios::tcgetattr(pty.master).is_ok());
@@ -46,7 +46,7 @@ fn test_tcgetattr_ebadf() {
 #[test]
 fn test_output_flags() {
     // openpty uses ptname(3) internally
-    let _m = ::PTSNAME_MTX.lock().expect("Mutex got poisoned by another test");
+    let _m = crate::PTSNAME_MTX.lock().expect("Mutex got poisoned by another test");
 
     // Open one pty to get attributes for the second one
     let mut termios = {
@@ -77,7 +77,7 @@ fn test_output_flags() {
 
     // Read from the slave verifying that the output has been properly transformed
     let mut buf = [0u8; 10];
-    ::read_exact(pty.slave, &mut buf);
+    crate::read_exact(pty.slave, &mut buf);
     let transformed_string = "foofoofoo\n";
     close(pty.master).unwrap();
     close(pty.slave).unwrap();
@@ -88,7 +88,7 @@ fn test_output_flags() {
 #[test]
 fn test_local_flags() {
     // openpty uses ptname(3) internally
-    let _m = ::PTSNAME_MTX.lock().expect("Mutex got poisoned by another test");
+    let _m = crate::PTSNAME_MTX.lock().expect("Mutex got poisoned by another test");
 
     // Open one pty to get attributes for the second one
     let mut termios = {
@@ -127,10 +127,4 @@ fn test_local_flags() {
     close(pty.master).unwrap();
     close(pty.slave).unwrap();
     assert_eq!(read, Error::Sys(Errno::EAGAIN));
-}
-
-#[test]
-fn test_cfmakeraw() {
-    let mut termios = unsafe { Termios::default_uninit() };
-    termios::cfmakeraw(&mut termios);
 }

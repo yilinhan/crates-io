@@ -61,11 +61,13 @@
     feature = "unstable_const",
     feature(
         ptr_offset_from,
+        const_fn,
         const_ptr_offset_from,
-        const_transmute,
-        const_raw_ptr_deref
+        const_maybe_uninit_as_ptr,
+        const_raw_ptr_deref,
     )
 )]
+#![cfg_attr(feature = "unstable_raw", feature(raw_ref_macros))]
 
 #[macro_use]
 #[cfg(doctests)]
@@ -79,10 +81,11 @@ doctest!("../README.md");
 // Doing this enables this crate to function under both std and no-std crates.
 #[doc(hidden)]
 pub use core::mem;
-
 #[doc(hidden)]
 pub use core::ptr;
 
+#[macro_use]
+mod raw_field;
 #[macro_use]
 mod offset_of;
 #[macro_use]

@@ -13,7 +13,7 @@
 [package]
 edition = "2018"
 name = "proc-macro-error"
-version = "0.4.11"
+version = "1.0.4"
 authors = ["CreepySkeleton <creepy-skeleton@yandex.ru>"]
 build = "build.rs"
 description = "Almost drop-in replacement to panics in proc-macros"
@@ -22,8 +22,10 @@ keywords = ["proc-macro", "error", "errors"]
 categories = ["development-tools::procedural-macro-helpers"]
 license = "MIT OR Apache-2.0"
 repository = "https://gitlab.com/CreepySkeleton/proc-macro-error"
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu"]
 [dependencies.proc-macro-error-attr]
-version = "=0.4.11"
+version = "=1.0.4"
 
 [dependencies.proc-macro2]
 version = "1"
@@ -33,8 +35,11 @@ version = "1"
 
 [dependencies.syn]
 version = "1"
-features = ["derive", "parsing", "proc-macro", "printing"]
+optional = true
 default-features = false
+[dev-dependencies.serde_derive]
+version = "=1.0.107"
+
 [dev-dependencies.toml]
 version = "=0.5.2"
 
@@ -43,5 +48,9 @@ version = "1.0.19"
 features = ["diff"]
 [build-dependencies.version_check]
 version = "0.9"
+
+[features]
+default = ["syn-error"]
+syn-error = ["syn"]
 [badges.maintenance]
-status = "actively-developed"
+status = "passively-maintained"

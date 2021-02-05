@@ -1,7 +1,49 @@
+# v1.0.4 (2020-7-31)
+
+* `SpanRange` facility is now public.
+* Docs have been improved.
+* Introduced the `syn-error` feature so you can opt-out from the `syn` dependency.
+
+# v1.0.3 (2020-6-26)
+
+* Corrected a few typos.
+* Fixed the `emit_call_site_warning` macro.
+
+# v1.0.2 (2020-4-9)
+
+* An obsolete note was removed from documentation.
+
+# v1.0.1 (2020-4-9)
+
+* `proc-macro-hack` is now well tested and supported. Not sure about `proc-macro-nested`,
+  please fill a request if you need it.
+* Fixed `emit_call_site_error`.
+* Documentation improvements.
+
+# v1.0.0 (2020-3-25)
+
+I believe the API can be considered stable because it's been a few months without
+breaking changes, and I also don't think this crate will receive much further evolution.
+It's perfect, admit it.
+
+Hence, meet the new, stable release!
+
+### Improvements
+
+* Supported nested `#[proc_macro_error]` attributes. Well, you aren't supposed to do that,
+  but I caught myself doing it by accident on one occasion and the behavior was... surprising.
+  Better to handle this smooth.
+
+# v0.4.12 (2020-3-23)
+
+* Error message on macros' misuse is now a bit more understandable.
+
 # v0.4.11 (2020-3-02)
 
 * `build.rs` no longer fails when `rustc` date could not be determined,
-  [thanks to `Fabian Möller`](https://gitlab.com/CreepySkeleton/proc-macro-error/-/merge_requests/25).
+  (thanks to [`Fabian Möller`](https://gitlab.com/CreepySkeleton/proc-macro-error/issues/8)
+  for noticing and to [`Igor Gnatenko`](https://gitlab.com/CreepySkeleton/proc-macro-error/-/merge_requests/25)
+  for fixing).
 
 # v0.4.10 (2020-2-29)
 

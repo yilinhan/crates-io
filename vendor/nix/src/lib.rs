@@ -15,21 +15,16 @@
 #![deny(missing_copy_implementations)]
 #![deny(missing_debug_implementations)]
 
-// External crates
-#[macro_use]
-extern crate bitflags;
-#[macro_use]
-extern crate cfg_if;
-extern crate void;
-
 // Re-exported external crates
-pub extern crate libc;
+pub use libc;
 
 // Private internal modules
 #[macro_use] mod macros;
 
 // Public crates
+#[cfg(not(target_os = "redox"))]
 pub mod dir;
+pub mod env;
 pub mod errno;
 #[deny(missing_docs)]
 pub mod features;
@@ -57,10 +52,12 @@ pub mod mount;
           target_os = "netbsd"))]
 pub mod mqueue;
 #[deny(missing_docs)]
+#[cfg(not(target_os = "redox"))]
 pub mod net;
 #[deny(missing_docs)]
 pub mod poll;
 #[deny(missing_docs)]
+#[cfg(not(target_os = "redox"))]
 pub mod pty;
 pub mod sched;
 pub mod sys;
@@ -280,24 +277,5 @@ impl NixPath for PathBuf {
 
     fn with_nix_path<T, F>(&self, f: F) -> Result<T> where F: FnOnce(&CStr) -> T {
         self.as_os_str().with_nix_path(f)
-    }
-}
-
-/// Treats `None` as an empty string.
-impl<'a, NP: ?Sized + NixPath>  NixPath for Option<&'a NP> {
-    fn is_empty(&self) -> bool {
-        self.map_or(true, NixPath::is_empty)
-    }
-
-    fn len(&self) -> usize {
-        self.map_or(0, NixPath::len)
-    }
-
-    fn with_nix_path<T, F>(&self, f: F) -> Result<T> where F: FnOnce(&CStr) -> T {
-        if let Some(nix_path) = *self {
-            nix_path.with_nix_path(f)
-        } else {
-            unsafe { CStr::from_ptr("\0".as_ptr() as *const _).with_nix_path(f) }
-        }
     }
 }

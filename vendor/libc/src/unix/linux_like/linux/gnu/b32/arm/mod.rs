@@ -212,7 +212,7 @@ pub const MAP_NONBLOCK: ::c_int = 0x010000;
 pub const MAP_STACK: ::c_int = 0x020000;
 pub const MAP_HUGETLB: ::c_int = 0x040000;
 pub const MAP_GROWSDOWN: ::c_int = 0x0100;
-pub const MAP_SYNC : ::c_int = 0x080000;
+pub const MAP_SYNC: ::c_int = 0x080000;
 
 pub const SOL_SOCKET: ::c_int = 1;
 
@@ -868,6 +868,8 @@ pub const SYS_pkey_mprotect: ::c_long = 394;
 pub const SYS_pkey_alloc: ::c_long = 395;
 pub const SYS_pkey_free: ::c_long = 396;
 pub const SYS_statx: ::c_long = 397;
+pub const SYS_pidfd_open: ::c_long = 434;
+pub const SYS_clone3: ::c_long = 435;
 
 cfg_if! {
     if #[cfg(libc_align)] {

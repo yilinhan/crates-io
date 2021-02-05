@@ -1,3 +1,31 @@
+# 0.3.0 (December 23, 2020)
+
+* Update to Tokio v1 and Bytes v1.
+* Disable `tracing`'s `log` feature. (It can still be enabled by a user in their own `Cargo.toml`.)
+
+# 0.2.7 (October 22, 2020)
+
+* Fix stream ref count when sending a push promise
+* Fix receiving empty DATA frames in response to a HEAD request
+* Fix handling of client disabling SERVER_PUSH
+
+# 0.2.6 (July 13, 2020)
+
+* Integrate `tracing` directly where `log` was used. (For 0.2.x, `log`s are still emitted by default.)
+
+# 0.2.5 (May 6, 2020)
+
+* Fix rare debug assert failure in store shutdown.
+
+# 0.2.4 (March 30, 2020)
+
+* Fix when receiving `SETTINGS_HEADER_TABLE_SIZE` setting.
+
+# 0.2.3 (March 25, 2020)
+
+* Fix server being able to accept `CONNECT` requests without `:scheme` or `:path`.
+* Fix receiving a GOAWAY frame from updating the recv max ID, it should only update max send ID.
+
 # 0.2.2 (March 3, 2020)
 
 * Reduce size of `FlowControl` and `RecvStream`.

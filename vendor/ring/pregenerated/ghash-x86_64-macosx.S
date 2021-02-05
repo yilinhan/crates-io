@@ -173,8 +173,9 @@ L$_init_clmul:
 .private_extern _GFp_gcm_gmult_clmul
 
 .p2align	4
-
 _GFp_gcm_gmult_clmul:
+
+L$_gmult_clmul:
 	movdqu	(%rdi),%xmm0
 	movdqa	L$bswap_mask(%rip),%xmm5
 	movdqu	(%rsi),%xmm2
@@ -1105,6 +1106,7 @@ L$0x1c2_polynomial:
 .byte	1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0xc2
 L$7_mask:
 .long	7,0,7,0
+.p2align	6
 
 .byte	71,72,65,83,72,32,102,111,114,32,120,56,54,95,54,52,44,32,67,82,89,80,84,79,71,65,77,83,32,98,121,32,60,97,112,112,114,111,64,111,112,101,110,115,115,108,46,111,114,103,62,0
 .p2align	6

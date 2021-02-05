@@ -274,6 +274,7 @@ fn test_appended_headers_not_overwritten() {
     assert_eq!(res.status(), reqwest::StatusCode::OK);
 }
 
+#[cfg_attr(not(debug_assertions), ignore)]
 #[test]
 #[should_panic]
 fn test_blocking_inside_a_runtime() {
@@ -286,4 +287,26 @@ fn test_blocking_inside_a_runtime() {
     rt.block_on(async move {
         let _should_panic = reqwest::blocking::get(&url);
     });
+}
+
+#[cfg(feature = "default-tls")]
+#[test]
+fn test_allowed_methods_blocking() {
+    let resp = reqwest::blocking::Client::builder()
+        .https_only(true)
+        .build()
+        .expect("client builder")
+        .get("https://google.com")
+        .send();
+
+    assert_eq!(resp.is_err(), false);
+
+    let resp = reqwest::blocking::Client::builder()
+        .https_only(true)
+        .build()
+        .expect("client builder")
+        .get("http://google.com")
+        .send();
+
+    assert_eq!(resp.is_err(), true);
 }

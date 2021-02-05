@@ -25,7 +25,10 @@ cfg_io_util! {
     mod chain;
 
     mod copy;
-    pub use copy::{copy, Copy};
+    pub use copy::copy;
+
+    mod copy_buf;
+    pub use copy_buf::copy_buf;
 
     mod empty;
     pub use empty::{empty, Empty};
@@ -35,6 +38,9 @@ cfg_io_util! {
     mod lines;
     pub use lines::Lines;
 
+    mod mem;
+    pub use mem::{duplex, DuplexStream};
+
     mod read;
     mod read_buf;
     mod read_exact;
@@ -42,6 +48,7 @@ cfg_io_util! {
     mod read_line;
 
     mod read_to_end;
+    mod vec_with_initialized;
     cfg_process! {
         pub(crate) use read_to_end::read_to_end;
     }
@@ -76,6 +83,7 @@ cfg_io_util! {
 
 cfg_not_io_util! {
     cfg_process! {
+        mod vec_with_initialized;
         mod read_to_end;
         // Used by process
         pub(crate) use read_to_end::read_to_end;

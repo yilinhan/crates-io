@@ -226,8 +226,12 @@ pub const S_ISUID: ::mode_t = 0x800;
 pub const S_ISGID: ::mode_t = 0x400;
 pub const S_ISVTX: ::mode_t = 0x200;
 
-pub const IF_NAMESIZE: ::size_t = 16;
-pub const IFNAMSIZ: ::size_t = IF_NAMESIZE;
+cfg_if! {
+    if #[cfg(not(any(target_os = "illumos", target_os = "solaris")))] {
+        pub const IF_NAMESIZE: ::size_t = 16;
+        pub const IFNAMSIZ: ::size_t = IF_NAMESIZE;
+    }
+}
 
 pub const LOG_EMERG: ::c_int = 0;
 pub const LOG_ALERT: ::c_int = 1;
@@ -265,10 +269,6 @@ pub const LOG_NOWAIT: ::c_int = 0x10;
 pub const LOG_PRIMASK: ::c_int = 7;
 pub const LOG_FACMASK: ::c_int = 0x3f8;
 
-pub const PRIO_PROCESS: ::c_int = 0;
-pub const PRIO_PGRP: ::c_int = 1;
-pub const PRIO_USER: ::c_int = 2;
-
 pub const PRIO_MIN: ::c_int = -20;
 pub const PRIO_MAX: ::c_int = 20;
 
@@ -298,6 +298,32 @@ cfg_if! {
     } else if #[cfg(feature = "std")] {
         // cargo build, don't pull in anything extra as the libstd dep
         // already pulls in all libs.
+    } else if #[cfg(all(target_os = "linux",
+                        any(target_env = "gnu", target_env = "uclibc"),
+                        feature = "rustc-dep-of-std"))] {
+        #[link(name = "util", kind = "static-nobundle",
+            cfg(target_feature = "crt-static"))]
+        #[link(name = "rt", kind = "static-nobundle",
+            cfg(target_feature = "crt-static"))]
+        #[link(name = "pthread", kind = "static-nobundle",
+            cfg(target_feature = "crt-static"))]
+        #[link(name = "m", kind = "static-nobundle",
+            cfg(target_feature = "crt-static"))]
+        #[link(name = "dl", kind = "static-nobundle",
+            cfg(target_feature = "crt-static"))]
+        #[link(name = "c", kind = "static-nobundle",
+            cfg(target_feature = "crt-static"))]
+        #[link(name = "gcc_eh", kind = "static-nobundle",
+            cfg(target_feature = "crt-static"))]
+        #[link(name = "gcc", kind = "static-nobundle",
+            cfg(target_feature = "crt-static"))]
+        #[link(name = "util", cfg(not(target_feature = "crt-static")))]
+        #[link(name = "rt", cfg(not(target_feature = "crt-static")))]
+        #[link(name = "pthread", cfg(not(target_feature = "crt-static")))]
+        #[link(name = "m", cfg(not(target_feature = "crt-static")))]
+        #[link(name = "dl", cfg(not(target_feature = "crt-static")))]
+        #[link(name = "c", cfg(not(target_feature = "crt-static")))]
+        extern {}
     } else if #[cfg(target_env = "musl")] {
         #[cfg_attr(feature = "rustc-dep-of-std",
                    link(name = "c", kind = "static",
@@ -419,6 +445,19 @@ extern "C" {
         mode: *const c_char,
         file: *mut FILE,
     ) -> *mut FILE;
+    pub fn fmemopen(
+        buf: *mut c_void,
+        size: size_t,
+        mode: *const c_char,
+    ) -> *mut FILE;
+    pub fn open_memstream(
+        ptr: *mut *mut c_char,
+        sizeloc: *mut size_t,
+    ) -> *mut FILE;
+    pub fn open_wmemstream(
+        ptr: *mut *mut wchar_t,
+        sizeloc: *mut size_t,
+    ) -> *mut FILE;
     pub fn fflush(file: *mut FILE) -> c_int;
     pub fn fclose(file: *mut FILE) -> c_int;
     pub fn remove(filename: *const c_char) -> c_int;
@@ -469,6 +508,7 @@ extern "C" {
     pub fn fsetpos(stream: *mut FILE, ptr: *const fpos_t) -> c_int;
     pub fn feof(stream: *mut FILE) -> c_int;
     pub fn ferror(stream: *mut FILE) -> c_int;
+    pub fn clearerr(stream: *mut FILE);
     pub fn perror(s: *const c_char);
     pub fn atoi(s: *const c_char) -> c_int;
     #[cfg_attr(
@@ -521,6 +561,7 @@ extern "C" {
     pub fn strspn(cs: *const c_char, ct: *const c_char) -> size_t;
     pub fn strcspn(cs: *const c_char, ct: *const c_char) -> size_t;
     pub fn strdup(cs: *const c_char) -> *mut c_char;
+    pub fn strndup(cs: *const c_char, n: size_t) -> *mut c_char;
     pub fn strpbrk(cs: *const c_char, ct: *const c_char) -> *mut c_char;
     pub fn strstr(cs: *const c_char, ct: *const c_char) -> *mut c_char;
     pub fn strcasecmp(s1: *const c_char, s2: *const c_char) -> c_int;
@@ -538,6 +579,7 @@ extern "C" {
     pub fn strerror(n: c_int) -> *mut c_char;
     pub fn strtok(s: *mut c_char, t: *const c_char) -> *mut c_char;
     pub fn strxfrm(s: *mut c_char, ct: *const c_char, n: size_t) -> size_t;
+    pub fn strsignal(sig: c_int) -> *mut c_char;
     pub fn wcslen(buf: *const wchar_t) -> size_t;
     pub fn wcstombs(
         dest: *mut c_char,
@@ -594,9 +636,19 @@ extern "C" {
     pub fn getchar_unlocked() -> ::c_int;
     pub fn putchar_unlocked(c: ::c_int) -> ::c_int;
 
+    #[cfg(not(all(
+        libc_cfg_target_vendor,
+        target_arch = "powerpc",
+        target_vendor = "nintendo"
+    )))]
     #[cfg_attr(target_os = "netbsd", link_name = "__socket30")]
     #[cfg_attr(target_os = "illumos", link_name = "__xnet_socket")]
     pub fn socket(domain: ::c_int, ty: ::c_int, protocol: ::c_int) -> ::c_int;
+    #[cfg(not(all(
+        libc_cfg_target_vendor,
+        target_arch = "powerpc",
+        target_vendor = "nintendo"
+    )))]
     #[cfg_attr(
         all(target_os = "macos", target_arch = "x86"),
         link_name = "connect$UNIX2003"
@@ -611,8 +663,12 @@ extern "C" {
         all(target_os = "macos", target_arch = "x86"),
         link_name = "listen$UNIX2003"
     )]
-    #[cfg_attr(target_os = "illumos", link_name = "__xnet_listen")]
     pub fn listen(socket: ::c_int, backlog: ::c_int) -> ::c_int;
+    #[cfg(not(all(
+        libc_cfg_target_vendor,
+        target_arch = "powerpc",
+        target_vendor = "nintendo"
+    )))]
     #[cfg_attr(
         all(target_os = "macos", target_arch = "x86"),
         link_name = "accept$UNIX2003"
@@ -622,6 +678,11 @@ extern "C" {
         address: *mut sockaddr,
         address_len: *mut socklen_t,
     ) -> ::c_int;
+    #[cfg(not(all(
+        libc_cfg_target_vendor,
+        target_arch = "powerpc",
+        target_vendor = "nintendo"
+    )))]
     #[cfg_attr(
         all(target_os = "macos", target_arch = "x86"),
         link_name = "getpeername$UNIX2003"
@@ -631,6 +692,11 @@ extern "C" {
         address: *mut sockaddr,
         address_len: *mut socklen_t,
     ) -> ::c_int;
+    #[cfg(not(all(
+        libc_cfg_target_vendor,
+        target_arch = "powerpc",
+        target_vendor = "nintendo"
+    )))]
     #[cfg_attr(
         all(target_os = "macos", target_arch = "x86"),
         link_name = "getsockname$UNIX2003"
@@ -658,6 +724,11 @@ extern "C" {
         protocol: ::c_int,
         socket_vector: *mut ::c_int,
     ) -> ::c_int;
+    #[cfg(not(all(
+        libc_cfg_target_vendor,
+        target_arch = "powerpc",
+        target_vendor = "nintendo"
+    )))]
     #[cfg_attr(
         all(target_os = "macos", target_arch = "x86"),
         link_name = "sendto$UNIX2003"
@@ -684,7 +755,10 @@ extern "C" {
     )]
     pub fn fchmod(fd: ::c_int, mode: mode_t) -> ::c_int;
 
-    #[cfg_attr(target_os = "macos", link_name = "fstat$INODE64")]
+    #[cfg_attr(
+        all(target_os = "macos", not(target_arch = "aarch64")),
+        link_name = "fstat$INODE64"
+    )]
     #[cfg_attr(target_os = "netbsd", link_name = "__fstat50")]
     #[cfg_attr(
         all(target_os = "freebsd", any(freebsd11, freebsd10)),
@@ -694,7 +768,10 @@ extern "C" {
 
     pub fn mkdir(path: *const c_char, mode: mode_t) -> ::c_int;
 
-    #[cfg_attr(target_os = "macos", link_name = "stat$INODE64")]
+    #[cfg_attr(
+        all(target_os = "macos", not(target_arch = "aarch64")),
+        link_name = "stat$INODE64"
+    )]
     #[cfg_attr(target_os = "netbsd", link_name = "__stat50")]
     #[cfg_attr(
         all(target_os = "freebsd", any(freebsd11, freebsd10)),
@@ -737,7 +814,10 @@ extern "C" {
     #[cfg_attr(target_os = "netbsd", link_name = "__opendir30")]
     pub fn opendir(dirname: *const c_char) -> *mut ::DIR;
 
-    #[cfg_attr(target_os = "macos", link_name = "readdir$INODE64")]
+    #[cfg_attr(
+        all(target_os = "macos", not(target_arch = "aarch64")),
+        link_name = "readdir$INODE64"
+    )]
     #[cfg_attr(target_os = "netbsd", link_name = "__readdir30")]
     #[cfg_attr(
         all(target_os = "freebsd", any(freebsd11, freebsd10)),
@@ -773,7 +853,10 @@ extern "C" {
         group: ::gid_t,
         flags: ::c_int,
     ) -> ::c_int;
-    #[cfg_attr(target_os = "macos", link_name = "fstatat$INODE64")]
+    #[cfg_attr(
+        all(target_os = "macos", not(target_arch = "aarch64")),
+        link_name = "fstatat$INODE64"
+    )]
     #[cfg_attr(
         all(target_os = "freebsd", any(freebsd11, freebsd10)),
         link_name = "fstatat@FBSD_1.1"
@@ -854,6 +937,7 @@ extern "C" {
     pub fn geteuid() -> uid_t;
     pub fn getgid() -> gid_t;
     pub fn getgroups(ngroups_max: ::c_int, groups: *mut gid_t) -> ::c_int;
+    #[cfg_attr(target_os = "illumos", link_name = "getloginx")]
     pub fn getlogin() -> *mut c_char;
     #[cfg_attr(
         all(target_os = "macos", target_arch = "x86"),
@@ -910,6 +994,7 @@ extern "C" {
         all(target_os = "macos", target_arch = "x86"),
         link_name = "ttyname_r$UNIX2003"
     )]
+    #[cfg_attr(target_os = "illumos", link_name = "__posix_ttyname_r")]
     pub fn ttyname_r(
         fd: ::c_int,
         buf: *mut c_char,
@@ -1004,7 +1089,10 @@ extern "C" {
         ifname: *mut ::c_char,
     ) -> *mut ::c_char;
 
-    #[cfg_attr(target_os = "macos", link_name = "lstat$INODE64")]
+    #[cfg_attr(
+        all(target_os = "macos", not(target_arch = "aarch64")),
+        link_name = "lstat$INODE64"
+    )]
     #[cfg_attr(target_os = "netbsd", link_name = "__lstat50")]
     #[cfg_attr(
         all(target_os = "freebsd", any(freebsd11, freebsd10)),
@@ -1216,12 +1304,23 @@ extern "C" {
     pub fn dlclose(handle: *mut ::c_void) -> ::c_int;
     pub fn dladdr(addr: *const ::c_void, info: *mut Dl_info) -> ::c_int;
 
+    #[cfg(not(all(
+        libc_cfg_target_vendor,
+        target_arch = "powerpc",
+        target_vendor = "nintendo"
+    )))]
+    #[cfg_attr(target_os = "illumos", link_name = "__xnet_getaddrinfo")]
     pub fn getaddrinfo(
         node: *const c_char,
         service: *const c_char,
         hints: *const addrinfo,
         res: *mut *mut addrinfo,
     ) -> ::c_int;
+    #[cfg(not(all(
+        libc_cfg_target_vendor,
+        target_arch = "powerpc",
+        target_vendor = "nintendo"
+    )))]
     pub fn freeaddrinfo(res: *mut addrinfo);
     pub fn gai_strerror(errcode: ::c_int) -> *const ::c_char;
     #[cfg_attr(
@@ -1240,23 +1339,41 @@ extern "C" {
     pub fn res_init() -> ::c_int;
 
     #[cfg_attr(target_os = "netbsd", link_name = "__gmtime_r50")]
+    #[cfg_attr(target_env = "musl", allow(deprecated))]
+    // FIXME: for `time_t`
     pub fn gmtime_r(time_p: *const time_t, result: *mut tm) -> *mut tm;
     #[cfg_attr(target_os = "netbsd", link_name = "__localtime_r50")]
+    #[cfg_attr(target_env = "musl", allow(deprecated))]
+    // FIXME: for `time_t`
     pub fn localtime_r(time_p: *const time_t, result: *mut tm) -> *mut tm;
     #[cfg_attr(
         all(target_os = "macos", target_arch = "x86"),
         link_name = "mktime$UNIX2003"
     )]
     #[cfg_attr(target_os = "netbsd", link_name = "__mktime50")]
+    #[cfg_attr(target_env = "musl", allow(deprecated))]
+    // FIXME: for `time_t`
     pub fn mktime(tm: *mut tm) -> time_t;
     #[cfg_attr(target_os = "netbsd", link_name = "__time50")]
+    #[cfg_attr(target_env = "musl", allow(deprecated))]
+    // FIXME: for `time_t`
     pub fn time(time: *mut time_t) -> time_t;
     #[cfg_attr(target_os = "netbsd", link_name = "__gmtime50")]
+    #[cfg_attr(target_env = "musl", allow(deprecated))]
+    // FIXME: for `time_t`
     pub fn gmtime(time_p: *const time_t) -> *mut tm;
     #[cfg_attr(target_os = "netbsd", link_name = "__locatime50")]
+    #[cfg_attr(target_env = "musl", allow(deprecated))]
+    // FIXME: for `time_t`
     pub fn localtime(time_p: *const time_t) -> *mut tm;
     #[cfg_attr(target_os = "netbsd", link_name = "__difftime50")]
+    #[cfg_attr(target_env = "musl", allow(deprecated))]
+    // FIXME: for `time_t`
     pub fn difftime(time1: time_t, time0: time_t) -> ::c_double;
+    #[cfg_attr(target_os = "netbsd", link_name = "__timegm50")]
+    #[cfg_attr(target_env = "musl", allow(deprecated))]
+    // FIXME: for `time_t`
+    pub fn timegm(tm: *mut ::tm) -> time_t;
 
     #[cfg_attr(target_os = "netbsd", link_name = "__mknod50")]
     #[cfg_attr(
@@ -1269,10 +1386,17 @@ extern "C" {
         dev: ::dev_t,
     ) -> ::c_int;
     pub fn gethostname(name: *mut ::c_char, len: ::size_t) -> ::c_int;
+    pub fn endservent();
     pub fn getservbyname(
         name: *const ::c_char,
         proto: *const ::c_char,
     ) -> *mut servent;
+    pub fn getservbyport(
+        port: ::c_int,
+        proto: *const ::c_char,
+    ) -> *mut servent;
+    pub fn getservent() -> *mut servent;
+    pub fn setservent(stayopen: ::c_int);
     pub fn getprotobyname(name: *const ::c_char) -> *mut protoent;
     pub fn getprotobynumber(proto: ::c_int) -> *mut protoent;
     pub fn chroot(name: *const ::c_char) -> ::c_int;
@@ -1371,9 +1495,6 @@ extern "C" {
     #[cfg_attr(target_os = "netbsd", link_name = "__sigpending14")]
     pub fn sigpending(set: *mut sigset_t) -> ::c_int;
 
-    #[cfg_attr(target_os = "netbsd", link_name = "__timegm50")]
-    pub fn timegm(tm: *mut ::tm) -> time_t;
-
     pub fn sysconf(name: ::c_int) -> ::c_long;
 
     pub fn mkfifo(path: *const c_char, mode: mode_t) -> ::c_int;
@@ -1447,6 +1568,8 @@ extern "C" {
         n: *mut size_t,
         stream: *mut FILE,
     ) -> ssize_t;
+
+    pub fn lockf(fd: ::c_int, cmd: ::c_int, len: ::off_t) -> ::c_int;
 }
 
 cfg_if! {
@@ -1473,15 +1596,17 @@ cfg_if! {
                        link_name = "fdopendir$INODE64$UNIX2003")]
             pub fn fdopendir(fd: ::c_int) -> *mut ::DIR;
 
-            #[cfg_attr(target_os = "macos", link_name = "readdir_r$INODE64")]
+            #[cfg_attr(all(target_os = "macos", not(target_arch = "aarch64")),
+                       link_name = "readdir_r$INODE64")]
             #[cfg_attr(target_os = "netbsd", link_name = "__readdir_r30")]
             #[cfg_attr(
                 all(target_os = "freebsd", any(freebsd11, freebsd10)),
                 link_name = "readdir_r@FBSD_1.0"
             )]
-            /// The 64-bit libc on Solaris and illumos only has readdir_r.  If a
+            #[allow(non_autolinks)] // FIXME: `<>` breaks line length limit.
+            /// The 64-bit libc on Solaris and illumos only has readdir_r. If a
             /// 32-bit Solaris or illumos target is ever created, it should use
-            /// __posix_readdir_r.  See libc(3LIB) on Solaris or illumos:
+            /// __posix_readdir_r. See libc(3LIB) on Solaris or illumos:
             /// https://illumos.org/man/3lib/libc
             /// https://docs.oracle.com/cd/E36784_01/html/E36873/libc-3lib.html
             /// https://www.unix.com/man-page/opensolaris/3LIB/libc/

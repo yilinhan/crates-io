@@ -12,7 +12,7 @@
 
 [package]
 name = "yasna"
-version = "0.3.1"
+version = "0.3.2"
 authors = ["Masaki Hara <ackie.h.gmai@gmail.com>"]
 include = ["src/**/*.rs", "Cargo.toml"]
 description = "ASN.1 library for Rust"
@@ -32,7 +32,9 @@ default-features = false
 
 [dependencies.chrono]
 version = "0.4"
+features = ["std"]
 optional = true
+default-features = false
 
 [dependencies.num-bigint]
 version = "0.2"

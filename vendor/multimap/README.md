@@ -29,15 +29,23 @@ fn main () {
 
 ## Changelog
 
-### 0.7.0
+### 0.8.2
 
-* Added possibility to replace the default hasher for the underlying ```HashMap```.
-* Fix build warning by removing an unnecessary ```mut```.
+* Added ```#![forbid(unsafe_code)]```.
+
+### 0.8.1
+
+* Fixed wrong link to documentation in Crago.toml.
 
 ### 0.8.0
 
 * Added MultiMap::insert_many
 * Added MultiMap::insert_many_from_slice
+
+### 0.7.0
+
+* Added possibility to replace the default hasher for the underlying ```HashMap```.
+* Fix build warning by removing an unnecessary ```mut```.
 
 ## License
 

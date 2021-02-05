@@ -1,9 +1,12 @@
-use core::{mem::ManuallyDrop, ptr, time::Duration};
+use crate::traits::Sealed;
+use core::{mem::ManuallyDrop, ptr};
+#[cfg(feature = "std")]
 use std::{
     sync::{Condvar, LockResult, MutexGuard, WaitTimeoutResult},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
+#[cfg(feature = "std")]
 #[inline(always)]
 fn new_wait_timeout_result(value: bool) -> WaitTimeoutResult {
     // Safety: WaitTimeoutResult is a thin wrapper around a boolean. As the
@@ -13,12 +16,8 @@ fn new_wait_timeout_result(value: bool) -> WaitTimeoutResult {
     unsafe { core::mem::transmute(value) }
 }
 
-mod private_condvar {
-    pub trait Sealed {}
-    impl Sealed for super::Condvar {}
-}
-
-pub trait Condvar_v1_42: private_condvar::Sealed {
+#[cfg(feature = "std")]
+pub trait Condvar_v1_42: Sealed<Condvar> {
     fn wait_while<'a, T, F>(
         &self,
         guard: MutexGuard<'a, T>,
@@ -36,6 +35,7 @@ pub trait Condvar_v1_42: private_condvar::Sealed {
         F: FnMut(&mut T) -> bool;
 }
 
+#[cfg(feature = "std")]
 impl Condvar_v1_42 for Condvar {
     fn wait_while<'a, T, F>(
         &self,
@@ -74,12 +74,7 @@ impl Condvar_v1_42 for Condvar {
     }
 }
 
-mod private_manually_drop {
-    pub trait Sealed {}
-    impl<T> Sealed for super::ManuallyDrop<T> {}
-}
-
-pub trait ManuallyDrop_v1_42<T>: private_manually_drop::Sealed {
+pub trait ManuallyDrop_v1_42<T>: Sealed<ManuallyDrop<T>> {
     unsafe fn take(slot: &mut ManuallyDrop<T>) -> T;
 }
 
@@ -105,5 +100,12 @@ macro_rules! matches {
             $( $pattern )|+ if $guard => true,
             _ => false
         }
-    }
+    };
+
+    ($expression:expr, $( $pattern:pat )|+ if $guard:expr ,) => {
+        match $expression {
+            $( $pattern )|+ if $guard => true,
+            _ => false
+        }
+    };
 }

@@ -1,17 +1,8 @@
-
 use std::collections::VecDeque;
 use std::io;
 
 use crate::msgs::codec;
-use crate::msgs::codec::Codec;
-use crate::msgs::message::Message;
-
-const HEADER_SIZE: usize = 1 + 2 + 2;
-
-/// This is the maximum on-the-wire size of a TLSCiphertext.
-/// That's 2^14 payload bytes, a header, and a 2KB allowance
-/// for ciphertext overheads.
-const MAX_MESSAGE: usize = 16384 + 2048 + HEADER_SIZE;
+use crate::msgs::message::{Message, MessageError};
 
 /// This deframer works to reconstruct TLS messages
 /// from arbitrary-sized reads, buffering as necessary.
@@ -27,7 +18,7 @@ pub struct MessageDeframer {
 
     /// A fixed-size buffer containing the currently-accumulating
     /// TLS message.
-    buf: Box<[u8; MAX_MESSAGE]>,
+    buf: Box<[u8; Message::MAX_WIRE_SIZE]>,
 
     /// What size prefix of `buf` is used.
     used: usize,
@@ -46,7 +37,9 @@ enum BufferContents {
 }
 
 impl Default for MessageDeframer {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MessageDeframer {
@@ -54,7 +47,7 @@ impl MessageDeframer {
         MessageDeframer {
             frames: VecDeque::new(),
             desynced: false,
-            buf: Box::new([0u8; MAX_MESSAGE]),
+            buf: Box::new([0u8; Message::MAX_WIRE_SIZE]),
             used: 0,
         }
     }
@@ -67,20 +60,18 @@ impl MessageDeframer {
         // we get a message with a length field out of range here,
         // we do a zero length read.  That looks like an EOF to
         // the next layer up, which is fine.
-        debug_assert!(self.used <= MAX_MESSAGE);
+        debug_assert!(self.used <= Message::MAX_WIRE_SIZE);
         let new_bytes = rd.read(&mut self.buf[self.used..])?;
 
         self.used += new_bytes;
 
         loop {
-            match self.buf_contains_message() {
+            match self.try_deframe_one() {
                 BufferContents::Invalid => {
                     self.desynced = true;
                     break;
                 }
-                BufferContents::Valid => {
-                    self.deframe_one();
-                }
+                BufferContents::Valid => continue,
                 BufferContents::Partial => break,
             }
         }
@@ -97,39 +88,23 @@ impl MessageDeframer {
 
     /// Does our `buf` contain a full message?  It does if it is big enough to
     /// contain a header, and that header has a length which falls within `buf`.
-    fn buf_contains_message(&self) -> BufferContents {
-        if self.used < HEADER_SIZE {
-            return BufferContents::Partial;
+    /// If so, deframe it and place the message onto the frames output queue.
+    fn try_deframe_one(&mut self) -> BufferContents {
+        // Try to decode a message off the front of buf.
+        let mut rd = codec::Reader::init(&self.buf[..self.used]);
+
+        match Message::read_with_detailed_error(&mut rd) {
+            Ok(m) => {
+                let used = rd.used();
+                self.frames.push_back(m);
+                self.buf_consume(used);
+                BufferContents::Valid
+            }
+            Err(MessageError::TooShortForHeader) | Err(MessageError::TooShortForLength) => {
+                BufferContents::Partial
+            }
+            Err(_) => BufferContents::Invalid,
         }
-
-        let len_maybe = Message::check_header(&self.buf[..self.used]);
-
-        // Header damaged.
-        if len_maybe == None {
-            return BufferContents::Invalid;
-        }
-
-        let len = len_maybe.unwrap();
-
-        // This is just too large.
-        if len >= MAX_MESSAGE - HEADER_SIZE {
-            return BufferContents::Invalid;
-        }
-
-        let full_message = self.used >= len + HEADER_SIZE;
-        if full_message { BufferContents::Valid } else { BufferContents::Partial }
-    }
-
-    /// Take a TLS message off the front of `buf`, and put it onto the back
-    /// of our `frames` deque.
-    fn deframe_one(&mut self) {
-        let used = {
-            let mut rd = codec::Reader::init(&self.buf[..self.used]);
-            let m = Message::read(&mut rd).unwrap();
-            self.frames.push_back(m);
-            rd.used()
-        };
-        self.buf_consume(used);
     }
 
     fn buf_consume(&mut self, taken: usize) {
@@ -146,13 +121,10 @@ impl MessageDeframer {
              * +----------+----------+----------+
              * 0          ^ self.used
              */
-            let used_after = self.used - taken;
 
-            for i in 0..used_after {
-                self.buf[i] = self.buf[i + taken];
-            }
-
-            self.used = used_after;
+            self.buf
+                .copy_within(taken..self.used, 0);
+            self.used = self.used - taken;
         } else if taken == self.used {
             self.used = 0;
         }
@@ -162,8 +134,8 @@ impl MessageDeframer {
 #[cfg(test)]
 mod tests {
     use super::MessageDeframer;
-    use std::io;
     use crate::msgs;
+    use std::io;
 
     const FIRST_MESSAGE: &'static [u8] = include_bytes!("../testdata/deframer-test.1.bin");
     const SECOND_MESSAGE: &'static [u8] = include_bytes!("../testdata/deframer-test.2.bin");
@@ -202,7 +174,11 @@ mod tests {
         d.read(&mut rd)
     }
 
-    fn input_bytes_concat(d: &mut MessageDeframer, bytes1: &[u8], bytes2: &[u8]) -> io::Result<usize> {
+    fn input_bytes_concat(
+        d: &mut MessageDeframer,
+        bytes1: &[u8],
+        bytes2: &[u8],
+    ) -> io::Result<usize> {
         let mut bytes = vec![0u8; bytes1.len() + bytes2.len()];
         bytes[..bytes1.len()].clone_from_slice(bytes1);
         bytes[bytes1.len()..].clone_from_slice(bytes2);
@@ -226,8 +202,7 @@ mod tests {
                 *b = i as u8;
             }
 
-            let error = self.error.take()
-                .unwrap();
+            let error = self.error.take().unwrap();
             Err(error)
         }
     }
@@ -327,8 +302,10 @@ mod tests {
     fn test_two_in_one_read() {
         let mut d = MessageDeframer::new();
         assert_eq!(d.has_pending(), false);
-        assert_len(FIRST_MESSAGE.len() + SECOND_MESSAGE.len(),
-                   input_bytes_concat(&mut d, FIRST_MESSAGE, SECOND_MESSAGE));
+        assert_len(
+            FIRST_MESSAGE.len() + SECOND_MESSAGE.len(),
+            input_bytes_concat(&mut d, FIRST_MESSAGE, SECOND_MESSAGE),
+        );
         assert_eq!(d.frames.len(), 2);
         pop_first(&mut d);
         pop_second(&mut d);
@@ -339,8 +316,10 @@ mod tests {
     fn test_two_in_one_read_shortest_first() {
         let mut d = MessageDeframer::new();
         assert_eq!(d.has_pending(), false);
-        assert_len(FIRST_MESSAGE.len() + SECOND_MESSAGE.len(),
-                   input_bytes_concat(&mut d, SECOND_MESSAGE, FIRST_MESSAGE));
+        assert_len(
+            FIRST_MESSAGE.len() + SECOND_MESSAGE.len(),
+            input_bytes_concat(&mut d, SECOND_MESSAGE, FIRST_MESSAGE),
+        );
         assert_eq!(d.frames.len(), 2);
         pop_second(&mut d);
         pop_first(&mut d);
@@ -352,8 +331,10 @@ mod tests {
         let mut d = MessageDeframer::new();
         assert_len(3, input_bytes(&mut d, &FIRST_MESSAGE[..3]));
         input_error(&mut d);
-        assert_len(FIRST_MESSAGE.len() - 3,
-                   input_bytes(&mut d, &FIRST_MESSAGE[3..]));
+        assert_len(
+            FIRST_MESSAGE.len() - 3,
+            input_bytes(&mut d, &FIRST_MESSAGE[3..]),
+        );
         assert_eq!(d.frames.len(), 1);
         pop_first(&mut d);
         assert_eq!(d.has_pending(), false);

@@ -1,18 +1,16 @@
-extern crate serde;
-
-use self::serde::de::value::{MapDeserializer, SeqDeserializer};
-use self::serde::de::{
+use serde::de::value::{MapDeserializer, SeqDeserializer};
+use serde::de::{
     Deserialize, Deserializer, Error, IntoDeserializer, MapAccess, SeqAccess, Visitor,
 };
-use self::serde::ser::{Serialize, SerializeMap, SerializeSeq, Serializer};
+use serde::ser::{Serialize, Serializer};
 
-use std::fmt::{self, Formatter};
-use std::hash::{BuildHasher, Hash};
-use std::marker::PhantomData;
+use core::fmt::{self, Formatter};
+use core::hash::{BuildHasher, Hash};
+use core::marker::PhantomData;
 
-use IndexMap;
+use crate::IndexMap;
 
-/// Requires crate feature `"serde-1"`
+/// Requires crate feature `"serde"` or `"serde-1"`
 impl<K, V, S> Serialize for IndexMap<K, V, S>
 where
     K: Serialize + Hash + Eq,
@@ -23,17 +21,13 @@ where
     where
         T: Serializer,
     {
-        let mut map_serializer = serializer.serialize_map(Some(self.len()))?;
-        for (key, value) in self {
-            map_serializer.serialize_entry(key, value)?;
-        }
-        map_serializer.end()
+        serializer.collect_map(self)
     }
 }
 
-struct OrderMapVisitor<K, V, S>(PhantomData<(K, V, S)>);
+struct IndexMapVisitor<K, V, S>(PhantomData<(K, V, S)>);
 
-impl<'de, K, V, S> Visitor<'de> for OrderMapVisitor<K, V, S>
+impl<'de, K, V, S> Visitor<'de> for IndexMapVisitor<K, V, S>
 where
     K: Deserialize<'de> + Eq + Hash,
     V: Deserialize<'de>,
@@ -41,7 +35,7 @@ where
 {
     type Value = IndexMap<K, V, S>;
 
-    fn expecting(&self, formatter: &mut Formatter) -> fmt::Result {
+    fn expecting(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         write!(formatter, "a map")
     }
 
@@ -60,7 +54,7 @@ where
     }
 }
 
-/// Requires crate feature `"serde-1"`
+/// Requires crate feature `"serde"` or `"serde-1"`
 impl<'de, K, V, S> Deserialize<'de> for IndexMap<K, V, S>
 where
     K: Deserialize<'de> + Eq + Hash,
@@ -71,7 +65,7 @@ where
     where
         D: Deserializer<'de>,
     {
-        deserializer.deserialize_map(OrderMapVisitor(PhantomData))
+        deserializer.deserialize_map(IndexMapVisitor(PhantomData))
     }
 }
 
@@ -89,9 +83,9 @@ where
     }
 }
 
-use IndexSet;
+use crate::IndexSet;
 
-/// Requires crate feature `"serde-1"`
+/// Requires crate feature `"serde"` or `"serde-1"`
 impl<T, S> Serialize for IndexSet<T, S>
 where
     T: Serialize + Hash + Eq,
@@ -101,24 +95,20 @@ where
     where
         Se: Serializer,
     {
-        let mut set_serializer = serializer.serialize_seq(Some(self.len()))?;
-        for value in self {
-            set_serializer.serialize_element(value)?;
-        }
-        set_serializer.end()
+        serializer.collect_seq(self)
     }
 }
 
-struct OrderSetVisitor<T, S>(PhantomData<(T, S)>);
+struct IndexSetVisitor<T, S>(PhantomData<(T, S)>);
 
-impl<'de, T, S> Visitor<'de> for OrderSetVisitor<T, S>
+impl<'de, T, S> Visitor<'de> for IndexSetVisitor<T, S>
 where
     T: Deserialize<'de> + Eq + Hash,
     S: Default + BuildHasher,
 {
     type Value = IndexSet<T, S>;
 
-    fn expecting(&self, formatter: &mut Formatter) -> fmt::Result {
+    fn expecting(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         write!(formatter, "a set")
     }
 
@@ -137,7 +127,7 @@ where
     }
 }
 
-/// Requires crate feature `"serde-1"`
+/// Requires crate feature `"serde"` or `"serde-1"`
 impl<'de, T, S> Deserialize<'de> for IndexSet<T, S>
 where
     T: Deserialize<'de> + Eq + Hash,
@@ -147,7 +137,7 @@ where
     where
         D: Deserializer<'de>,
     {
-        deserializer.deserialize_seq(OrderSetVisitor(PhantomData))
+        deserializer.deserialize_seq(IndexSetVisitor(PhantomData))
     }
 }
 

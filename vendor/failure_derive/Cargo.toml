@@ -12,7 +12,7 @@
 
 [package]
 name = "failure_derive"
-version = "0.1.7"
+version = "0.1.8"
 authors = ["Without Boats <woboats@gmail.com>"]
 build = "build.rs"
 description = "derives for the failure crate"
@@ -39,3 +39,5 @@ version = "0.1.0"
 
 [features]
 std = []
+[badges.maintenance]
+status = "deprecated"

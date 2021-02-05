@@ -3,7 +3,6 @@
 use cfg_if::cfg_if;
 use env_logger;
 use futures::join;
-use futures::stream::StreamExt;
 use native_tls;
 use native_tls::{Identity, TlsAcceptor, TlsConnector};
 use std::io::Write;
@@ -12,6 +11,7 @@ use std::process::Command;
 use std::ptr;
 use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt, Error, ErrorKind};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::stream::StreamExt;
 use tokio_tls;
 
 macro_rules! t {
@@ -280,7 +280,7 @@ cfg_if! {
         use winapi::um::timezoneapi::*;
         use winapi::um::wincrypt::*;
 
-        const FRIENDLY_NAME: &'static str = "tokio-tls localhost testing cert";
+        const FRIENDLY_NAME: &str = "tokio-tls localhost testing cert";
 
         fn contexts() -> (tokio_tls::TlsAcceptor, tokio_tls::TlsConnector) {
             let cert = localhost_cert();
@@ -433,7 +433,7 @@ description should mention "tokio-tls".
                 let mut expiration_date: SYSTEMTIME = mem::zeroed();
                 GetSystemTime(&mut expiration_date);
                 let mut file_time: FILETIME = mem::zeroed();
-                let res = SystemTimeToFileTime(&mut expiration_date,
+                let res = SystemTimeToFileTime(&expiration_date,
                                                &mut file_time);
                 if res != TRUE {
                     return Err(Error::last_os_error());

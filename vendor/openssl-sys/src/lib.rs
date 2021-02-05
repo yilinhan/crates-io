@@ -1,6 +1,15 @@
-#![allow(non_camel_case_types, non_upper_case_globals, non_snake_case)]
-#![allow(dead_code, overflowing_literals, unused_imports)]
+#![allow(
+    clippy::missing_safety_doc,
+    clippy::unreadable_literal,
+    dead_code,
+    non_camel_case_types,
+    non_snake_case,
+    non_upper_case_globals,
+    overflowing_literals,
+    unused_imports
+)]
 #![doc(html_root_url = "https://docs.rs/openssl-sys/0.9")]
+#![recursion_limit = "128"] // configure fixed limit across all rust versions
 
 extern crate libc;
 
@@ -93,8 +102,13 @@ pub fn init() {
     // explicitly initialize to work around https://github.com/openssl/openssl/issues/3505
     static INIT: Once = Once::new();
 
+    #[cfg(not(ossl111b))]
+    let init_options = OPENSSL_INIT_LOAD_SSL_STRINGS;
+    #[cfg(ossl111b)]
+    let init_options = OPENSSL_INIT_LOAD_SSL_STRINGS | OPENSSL_INIT_NO_ATEXIT;
+
     INIT.call_once(|| unsafe {
-        OPENSSL_init_ssl(OPENSSL_INIT_LOAD_SSL_STRINGS, ptr::null_mut());
+        OPENSSL_init_ssl(init_options, ptr::null_mut());
     })
 }
 
@@ -103,7 +117,7 @@ pub fn init() {
     use std::io::{self, Write};
     use std::mem;
     use std::process;
-    use std::sync::{Mutex, MutexGuard, Once, ONCE_INIT};
+    use std::sync::{Mutex, MutexGuard, Once};
 
     static mut MUTEXES: *mut Vec<Mutex<()>> = 0 as *mut Vec<Mutex<()>>;
     static mut GUARDS: *mut Vec<Option<MutexGuard<'static, ()>>> =
@@ -147,7 +161,7 @@ pub fn init() {
         }
     }
 
-    static INIT: Once = ONCE_INIT;
+    static INIT: Once = Once::new();
 
     INIT.call_once(|| unsafe {
         SSL_library_init();

@@ -152,8 +152,9 @@ assert_eq!(after, "03/14/2012, 01/01/2013 and 07/05/2014");
 ```
 
 If you wish to match against whitespace in this mode, you can still use `\s`,
-`\n`, `\t`, etc. For escaping a single space character, you can use its hex
-character code `\x20` or temporarily disable the `x` flag, e.g., `(?-x: )`.
+`\n`, `\t`, etc. For escaping a single space character, you can escape it
+directly with `\ `, use its hex character code `\x20` or temporarily disable
+the `x` flag, e.g., `(?-x: )`.
 
 # Example: match multiple regular expressions simultaneously
 
@@ -364,7 +365,7 @@ $     the end of text (or end-of-line with multi-line mode)
 
 <pre class="rust">
 (exp)          numbered capture group (indexed by opening parenthesis)
-(?P&lt;name&gt;exp)  named (also numbered) capture group (allowed chars: [_0-9a-zA-Z])
+(?P&lt;name&gt;exp)  named (also numbered) capture group (allowed chars: [_0-9a-zA-Z.\[\]])
 (?:exp)        non-capturing group
 (?flags)       set flags within current group
 (?flags:exp)   set flags for exp (non-capturing)
@@ -561,7 +562,7 @@ All features below are enabled by default.
   [Unicode's "simple loose matches" specification](https://www.unicode.org/reports/tr18/#Simple_Loose_Matches).
 * **unicode-gencat** -
   Provide the data for
-  [Uncode general categories](https://www.unicode.org/reports/tr44/tr44-24.html#General_Category_Values).
+  [Unicode general categories](https://www.unicode.org/reports/tr44/tr44-24.html#General_Category_Values).
   This includes, but is not limited to, `Decimal_Number`, `Letter`,
   `Math_Symbol`, `Number` and `Punctuation`.
 * **unicode-perl** -
@@ -615,14 +616,15 @@ another matching engine with fixed memory requirements.
 #![deny(missing_docs)]
 #![cfg_attr(test, deny(warnings))]
 #![cfg_attr(feature = "pattern", feature(pattern))]
+#![warn(missing_debug_implementations)]
 
 #[cfg(not(feature = "std"))]
 compile_error!("`std` feature is currently required to build this crate");
 
 #[cfg(feature = "perf-literal")]
 extern crate aho_corasick;
-#[cfg(test)]
-extern crate doc_comment;
+// #[cfg(doctest)]
+// extern crate doc_comment;
 #[cfg(feature = "perf-literal")]
 extern crate memchr;
 #[cfg(test)]
@@ -632,8 +634,8 @@ extern crate regex_syntax as syntax;
 #[cfg(feature = "perf-cache")]
 extern crate thread_local;
 
-#[cfg(test)]
-doc_comment::doctest!("../README.md");
+// #[cfg(doctest)]
+// doc_comment::doctest!("../README.md");
 
 #[cfg(feature = "std")]
 pub use error::Error;
@@ -730,8 +732,8 @@ Unicode codepoints. For example, in ASCII compatible mode, `\xFF` matches the
 literal byte `\xFF`, while in Unicode mode, `\xFF` is a Unicode codepoint that
 matches its UTF-8 encoding of `\xC3\xBF`. Similarly for octal notation when
 enabled.
-6. `.` matches any *byte* except for `\n` instead of any Unicode scalar value.
-When the `s` flag is enabled, `.` matches any byte.
+6. In ASCII compatible mode, `.` matches any *byte* except for `\n`. When the
+`s` flag is additionally enabled, `.` matches any byte.
 
 # Performance
 

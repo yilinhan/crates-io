@@ -1,6 +1,6 @@
 #[cfg(any(
     feature = "native-tls",
-    feature = "rustls-tls",
+    feature = "__rustls",
 ))]
 use std::any::Any;
 use std::convert::TryInto;
@@ -63,6 +63,7 @@ pub struct Client {
 /// # Ok(())
 /// # }
 /// ```
+#[must_use]
 pub struct ClientBuilder {
     inner: async_impl::ClientBuilder,
     timeout: Timeout,
@@ -205,6 +206,25 @@ impl ClientBuilder {
         self.with_inner(|inner| inner.gzip(enable))
     }
 
+    /// Enable auto brotli decompression by checking the `Content-Encoding` response header.
+    ///
+    /// If auto brotli decompression is turned on:
+    ///
+    /// - When sending a request and if the request's headers do not already contain
+    ///   an `Accept-Encoding` **and** `Range` values, the `Accept-Encoding` header is set to `br`.
+    ///   The request body is **not** automatically compressed.
+    /// - When receiving a response, if it's headers contain a `Content-Encoding` value that
+    ///   equals to `br`, both values `Content-Encoding` and `Content-Length` are removed from the
+    ///   headers' set. The response body is automatically decompressed.
+    ///
+    /// If the `brotli` feature is turned on, the default option is enabled.
+    ///
+    /// # Optional
+    ///
+    /// This requires the optional `brotli` feature to be enabled
+    #[cfg(feature = "brotli")]
+    pub fn brotli(self, enable: bool) -> ClientBuilder { self.with_inner(|inner| inner.brotli(enable)) }
+
     /// Disable auto response body gzip decompression.
     ///
     /// This method exists even if the optional `gzip` feature is not enabled.
@@ -213,6 +233,13 @@ impl ClientBuilder {
     pub fn no_gzip(self) -> ClientBuilder {
         self.with_inner(|inner| inner.no_gzip())
     }
+
+    /// Disable auto response body brotli decompression.
+    ///
+    /// This method exists even if the optional `brotli` feature is not enabled.
+    /// This can be used to ensure a `Client` doesn't use brotli decompression
+    /// even if another dependency were to enable the optional `brotli` feature.
+    pub fn no_brotli(self) -> ClientBuilder { self.with_inner(|inner| inner.no_brotli()) }
 
     // Redirect options
 
@@ -296,9 +323,27 @@ impl ClientBuilder {
 
     // HTTP options
 
+    /// Set an optional timeout for idle sockets being kept-alive.
+    ///
+    /// Pass `None` to disable timeout.
+    ///
+    /// Default is 90 seconds.
+    pub fn pool_idle_timeout<D>(self, val: D) -> ClientBuilder
+    where
+        D: Into<Option<Duration>>,
+    {
+        self.with_inner(|inner| inner.pool_idle_timeout(val))
+    }
+
     /// Sets the maximum idle connection per host allowed in the pool.
+    pub fn pool_max_idle_per_host(self, max: usize) -> ClientBuilder {
+        self.with_inner(move |inner| inner.pool_max_idle_per_host(max))
+    }
+
+    #[doc(hidden)]
+    #[deprecated(note = "use pool_max_idle_per_host instead")]
     pub fn max_idle_per_host(self, max: usize) -> ClientBuilder {
-        self.with_inner(move |inner| inner.max_idle_per_host(max))
+        self.pool_max_idle_per_host(max)
     }
 
     /// Enable case sensitive headers.
@@ -327,9 +372,23 @@ impl ClientBuilder {
 
     // TCP options
 
-    /// Set that all sockets have `SO_NODELAY` set to `true`.
+    #[doc(hidden)]
+    #[deprecated(note = "tcp_nodelay is enabled by default, use `tcp_nodelay_` to disable")]
     pub fn tcp_nodelay(self) -> ClientBuilder {
-        self.with_inner(move |inner| inner.tcp_nodelay())
+        self.tcp_nodelay_(true)
+    }
+
+    /// Set whether sockets have `SO_NODELAY` enabled.
+    ///
+    /// Default is `true`.
+    // NOTE: Regarding naming (trailing underscore):
+    //
+    // Due to the original `tcp_nodelay()` not taking an argument, changing
+    // the default means a user has no way of *disabling* this feature.
+    //
+    // TODO(v0.11.x): Remove trailing underscore.
+    pub fn tcp_nodelay_(self, enabled: bool) -> ClientBuilder {
+        self.with_inner(move |inner| inner.tcp_nodelay_(enabled))
     }
 
     /// Bind to a local IP Address.
@@ -348,6 +407,16 @@ impl ClientBuilder {
         T: Into<Option<IpAddr>>,
     {
         self.with_inner(move |inner| inner.local_address(addr))
+    }
+
+    /// Set that all sockets have `SO_KEEPALIVE` set with the supplied duration.
+    ///
+    /// If `None`, the option will not be set.
+    pub fn tcp_keepalive<D>(self, val: D) -> ClientBuilder
+        where
+            D: Into<Option<Duration>>,
+    {
+        self.with_inner(move |inner| inner.tcp_keepalive(val))
     }
 
     // TLS options
@@ -381,7 +450,7 @@ impl ClientBuilder {
     ///
     /// # Optional
     ///
-    /// This requires the optional `default-tls`, `native-tls`, or `rustls-tls`
+    /// This requires the optional `default-tls`, `native-tls`, or `rustls-tls(-...)`
     /// feature to be enabled.
     #[cfg(feature = "__tls")]
     pub fn add_root_certificate(self, cert: Certificate) -> ClientBuilder {
@@ -449,8 +518,8 @@ impl ClientBuilder {
     ///
     /// # Optional
     ///
-    /// This requires the optional `rustls-tls` feature to be enabled.
-    #[cfg(feature = "rustls-tls")]
+    /// This requires the optional `rustls-tls(-...)` feature to be enabled.
+    #[cfg(feature = "__rustls")]
     pub fn use_rustls_tls(self) -> ClientBuilder {
         self.with_inner(move |inner| inner.use_rustls_tls())
     }
@@ -472,10 +541,10 @@ impl ClientBuilder {
     /// # Optional
     ///
     /// This requires one of the optional features `native-tls` or
-    /// `rustls-tls` to be enabled.
+    /// `rustls-tls(-...)` to be enabled.
     #[cfg(any(
         feature = "native-tls",
-        feature = "rustls-tls",
+        feature = "__rustls",
     ))]
     pub fn use_preconfigured_tls(self, tls: impl Any) -> ClientBuilder {
         self.with_inner(move |inner| inner.use_preconfigured_tls(tls))
@@ -502,6 +571,13 @@ impl ClientBuilder {
         self.with_inner(|inner| inner.no_trust_dns())
     }
 
+    /// Restrict the Client to be used with HTTPS only requests.
+    /// 
+    /// Defaults to false.
+    pub fn https_only(self, enabled: bool) -> ClientBuilder {
+        self.with_inner(|inner| inner.https_only(enabled))
+    }
+
     // private
 
     fn with_inner<F>(mut self, func: F) -> ClientBuilder
@@ -510,6 +586,15 @@ impl ClientBuilder {
     {
         self.inner = func(self.inner);
         self
+    }
+}
+
+impl From<async_impl::ClientBuilder> for ClientBuilder {
+    fn from(builder: async_impl::ClientBuilder) -> Self {
+        Self {
+            inner: builder,
+            timeout: Timeout::default(),
+        }
     }
 }
 
@@ -524,7 +609,7 @@ impl Client {
     ///
     /// # Panic
     ///
-    /// This method panics if TLS backend cannot initialized, or the resolver
+    /// This method panics if TLS backend cannot be initialized, or the resolver
     /// cannot load the system configuration.
     ///
     /// Use `Client::builder()` if you wish to handle the failure as an `Error`

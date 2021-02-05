@@ -1,3 +1,56 @@
+## v0.10.10
+
+- Add `tcp_keepalive` option to `blocking::ClientBuilder`.
+- Add `multipart::Part::stream_with_length` constructor, to create a streaming part with a known length.
+- Add `ClientBuilder::https_only` option, to allow requiring URLs to be `https`.
+- Change default `tcp_keepalive` value to be disabled.
+
+## v0.10.9
+
+- Add `rustls-tls-native-roots`, `rustls-tls-webpki-roots`, and `rustls-tls-manual-roots` Cargo features, to configure which certificate roots to use with rustls.
+- Add `ClientBuilder::tcp_keepalive()` method to enable TCP keepalive.
+- Add `ClientBuilder::http1_writev()` method to force enable or disable vectored writes.
+- Add `Error::is_connect()` method to identify if the error is related to connection-establishment.
+- Add `blocking::ClientBuilder::brotli()` method.
+- Windows: Update default protocol to HTTP for HTTPS system proxies, when a protocol is not specified.
+- (wasm) Add support for Cloudflare workers runtime.
+- (wasm) Add `ClientBuilder::default_headers()` method.
+- (wasm) Add `RequestBuilder::build()` method.
+
+## v0.10.8
+
+- Add `must_use` to `RequestBuilder` and `ClientBuilder`.
+- Fix Windows system proxy detection of Fiddler proxies.
+- (wasm) Add `headers` method to `RequestBuilder`.
+- (wasm) Add `execute` method to `Client`.
+- (wasm) Add `TryFrom<http::Request>` for `Request`.
+- (wasm) Fix checking for global `window` to work in non-browser environments.
+- (wasm) Fix sending of an empty body when not required.
+
+## v0.10.7
+
+- Add `NO_PROXY` environment variable support.
+- Add more `Error::{is_request, is_body, is_decode}` getters.
+- Add conversion of `reqwest::ClientBuilder` to `reqwest::blocking::ClientBuilder`.
+- Add `headers_mut()` to `reqwest::blocking::Response`.
+- (wasm) Add `form()`, `query()`, `multipart` and `bearer_auth()` to `RequestBuilder`.
+
+## v0.10.6
+
+- Changed handling of URLs that don't have `http:` or `https:` schemes, returning an error instead.
+- Fixed a potential hyper-rustls feature conflict.
+
+## v0.10.5
+
+- Add `ClientBuilder::pool_idle_timeout` option.
+- Add `ClientBuilder::pool_max_idle_per_host` option, deprecate `max_idle_per_host`.
+- Add `Response::content_length` for WASM target.
+- Enable TCP_NODELAY by default.
+- Implement `TryFrom<http::Request>` for `blocking::Request`.
+- Implement `TryFrom<http::Request>` for `Request`.
+  - Removes `From<http::Request>` for `Request`.
+  - This is technically a breaking change, but was a mistake. It was not valid to convert from an `http::Request` to a `reqwest::Request` in an infallible fashion. It would panic if the conversion was not possible. Instead, the implementation has been changed to `TryFrom` to indicate it could fail.
+
 ## v0.10.4
 
 - Add `trust-dns` optional feature to change DNS resolver.

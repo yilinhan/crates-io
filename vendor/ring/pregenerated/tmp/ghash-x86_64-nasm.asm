@@ -176,8 +176,9 @@ $L$SEH_end_GFp_gcm_init_clmul:
 global	GFp_gcm_gmult_clmul
 
 ALIGN	16
-
 GFp_gcm_gmult_clmul:
+
+$L$_gmult_clmul:
 	movdqu	xmm0,XMMWORD[rcx]
 	movdqa	xmm5,XMMWORD[$L$bswap_mask]
 	movdqu	xmm2,XMMWORD[rdx]
@@ -1164,100 +1165,13 @@ $L$0x1c2_polynomial:
 DB	1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0xc2
 $L$7_mask:
 	DD	7,0,7,0
+ALIGN	64
 
 DB	71,72,65,83,72,32,102,111,114,32,120,56,54,95,54,52
 DB	44,32,67,82,89,80,84,79,71,65,77,83,32,98,121,32
 DB	60,97,112,112,114,111,64,111,112,101,110,115,115,108,46,111
 DB	114,103,62,0
 ALIGN	64
-EXTERN	__imp_RtlVirtualUnwind
-
-ALIGN	16
-se_handler:
-	push	rsi
-	push	rdi
-	push	rbx
-	push	rbp
-	push	r12
-	push	r13
-	push	r14
-	push	r15
-	pushfq
-	sub	rsp,64
-
-	mov	rax,QWORD[120+r8]
-	mov	rbx,QWORD[248+r8]
-
-	mov	rsi,QWORD[8+r9]
-	mov	r11,QWORD[56+r9]
-
-	mov	r10d,DWORD[r11]
-	lea	r10,[r10*1+rsi]
-	cmp	rbx,r10
-	jb	NEAR $L$in_prologue
-
-	mov	rax,QWORD[152+r8]
-
-	mov	r10d,DWORD[4+r11]
-	lea	r10,[r10*1+rsi]
-	cmp	rbx,r10
-	jae	NEAR $L$in_prologue
-
-	lea	rax,[((48+280))+rax]
-
-	mov	rbx,QWORD[((-8))+rax]
-	mov	rbp,QWORD[((-16))+rax]
-	mov	r12,QWORD[((-24))+rax]
-	mov	r13,QWORD[((-32))+rax]
-	mov	r14,QWORD[((-40))+rax]
-	mov	r15,QWORD[((-48))+rax]
-	mov	QWORD[144+r8],rbx
-	mov	QWORD[160+r8],rbp
-	mov	QWORD[216+r8],r12
-	mov	QWORD[224+r8],r13
-	mov	QWORD[232+r8],r14
-	mov	QWORD[240+r8],r15
-
-$L$in_prologue:
-	mov	rdi,QWORD[8+rax]
-	mov	rsi,QWORD[16+rax]
-	mov	QWORD[152+r8],rax
-	mov	QWORD[168+r8],rsi
-	mov	QWORD[176+r8],rdi
-
-	mov	rdi,QWORD[40+r9]
-	mov	rsi,r8
-	mov	ecx,154
-	DD	0xa548f3fc
-
-	mov	rsi,r9
-	xor	rcx,rcx
-	mov	rdx,QWORD[8+rsi]
-	mov	r8,QWORD[rsi]
-	mov	r9,QWORD[16+rsi]
-	mov	r10,QWORD[40+rsi]
-	lea	r11,[56+rsi]
-	lea	r12,[24+rsi]
-	mov	QWORD[32+rsp],r10
-	mov	QWORD[40+rsp],r11
-	mov	QWORD[48+rsp],r12
-	mov	QWORD[56+rsp],rcx
-	call	QWORD[__imp_RtlVirtualUnwind]
-
-	mov	eax,1
-	add	rsp,64
-	popfq
-	pop	r15
-	pop	r14
-	pop	r13
-	pop	r12
-	pop	rbp
-	pop	rbx
-	pop	rdi
-	pop	rsi
-	DB	0F3h,0C3h		;repret
-
-
 section	.pdata rdata align=4
 ALIGN	4
 	DD	$L$SEH_begin_GFp_gcm_init_clmul wrt ..imagebase

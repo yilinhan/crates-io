@@ -9,12 +9,15 @@ use bytes::BytesMut;
 use http::header::{self, Entry, HeaderName, HeaderValue};
 use http::{HeaderMap, Method, StatusCode, Version};
 
+use crate::body::DecodedLength;
+#[cfg(feature = "server")]
+use crate::common::date;
 use crate::error::Parse;
 use crate::headers;
 use crate::proto::h1::{
-    date, Encode, Encoder, Http1Transaction, ParseContext, ParseResult, ParsedMessage,
+    Encode, Encoder, Http1Transaction, ParseContext, ParseResult, ParsedMessage,
 };
-use crate::proto::{BodyLength, DecodedLength, MessageHead, RequestHead, RequestLine};
+use crate::proto::{BodyLength, MessageHead, RequestHead, RequestLine};
 
 const MAX_HEADERS: usize = 100;
 const AVERAGE_HEADER_SIZE: usize = 30; // totally scientific
@@ -34,7 +37,10 @@ macro_rules! header_name {
 
         #[cfg(not(debug_assertions))]
         {
-            HeaderName::from_bytes($bytes).expect("header name validated by httparse")
+            match HeaderName::from_bytes($bytes) {
+                Ok(name) => name,
+                Err(_) => panic!("illegal header name from httparse: {:?}", $bytes),
+            }
         }
     }};
 }
@@ -58,21 +64,51 @@ macro_rules! header_value {
     }};
 }
 
+pub(super) fn parse_headers<T>(
+    bytes: &mut BytesMut,
+    ctx: ParseContext<'_>,
+) -> ParseResult<T::Incoming>
+where
+    T: Http1Transaction,
+{
+    // If the buffer is empty, don't bother entering the span, it's just noise.
+    if bytes.is_empty() {
+        return Ok(None);
+    }
+
+    let span = trace_span!("parse_headers");
+    let _s = span.enter();
+    T::parse(bytes, ctx)
+}
+
+pub(super) fn encode_headers<T>(
+    enc: Encode<'_, T::Outgoing>,
+    dst: &mut Vec<u8>,
+) -> crate::Result<Encoder>
+where
+    T: Http1Transaction,
+{
+    let span = trace_span!("encode_headers");
+    let _s = span.enter();
+    T::encode(enc, dst)
+}
+
 // There are 2 main roles, Client and Server.
 
+#[cfg(feature = "client")]
 pub(crate) enum Client {}
 
+#[cfg(feature = "server")]
 pub(crate) enum Server {}
 
+#[cfg(feature = "server")]
 impl Http1Transaction for Server {
     type Incoming = RequestLine;
     type Outgoing = StatusCode;
     const LOG: &'static str = "{role=server}";
 
     fn parse(buf: &mut BytesMut, ctx: ParseContext<'_>) -> ParseResult<RequestLine> {
-        if buf.is_empty() {
-            return Ok(None);
-        }
+        debug_assert!(!buf.is_empty(), "parse called with empty buf");
 
         let mut keep_alive;
         let is_http_11;
@@ -234,6 +270,7 @@ impl Http1Transaction for Server {
                 version,
                 subject,
                 headers,
+                extensions: http::Extensions::default(),
             },
             decode: decoder,
             expect_continue,
@@ -297,7 +334,7 @@ impl Http1Transaction for Server {
                 Version::HTTP_10 => extend(dst, b"HTTP/1.0 "),
                 Version::HTTP_11 => extend(dst, b"HTTP/1.1 "),
                 Version::HTTP_2 => {
-                    warn!("response with HTTP2 version coerced to HTTP/1.1");
+                    debug!("response with HTTP2 version coerced to HTTP/1.1");
                     extend(dst, b"HTTP/1.1 ");
                 }
                 other => panic!("unexpected response version: {:?}", other),
@@ -359,7 +396,7 @@ impl Http1Transaction for Server {
                     }
                     match msg.body {
                         Some(BodyLength::Known(known_len)) => {
-                            // The Payload claims to know a length, and
+                            // The HttpBody claims to know a length, and
                             // the headers are already set. For performance
                             // reasons, we are just going to trust that
                             // the values match.
@@ -388,7 +425,7 @@ impl Http1Transaction for Server {
                             continue 'headers;
                         }
                         Some(BodyLength::Unknown) => {
-                            // The Payload impl didn't know how long the
+                            // The HttpBody impl didn't know how long the
                             // body is, but a length header was included.
                             // We have to parse the value to return our
                             // Encoder...
@@ -586,6 +623,7 @@ impl Http1Transaction for Server {
     }
 }
 
+#[cfg(feature = "server")]
 impl Server {
     fn can_have_body(method: &Option<Method>, status: StatusCode) -> bool {
         Server::can_chunked(method, status)
@@ -608,17 +646,17 @@ impl Server {
     }
 }
 
+#[cfg(feature = "client")]
 impl Http1Transaction for Client {
     type Incoming = StatusCode;
     type Outgoing = RequestLine;
     const LOG: &'static str = "{role=client}";
 
     fn parse(buf: &mut BytesMut, ctx: ParseContext<'_>) -> ParseResult<StatusCode> {
+        debug_assert!(!buf.is_empty(), "parse called with empty buf");
+
         // Loop to skip information status code headers (100 Continue, etc).
         loop {
-            if buf.is_empty() {
-                return Ok(None);
-            }
             // Unsafe: see comment in Server Http1Transaction, above.
             let mut headers_indices: [HeaderIndices; MAX_HEADERS] = unsafe { mem::uninitialized() };
             let (len, status, version, headers_len) = {
@@ -676,6 +714,7 @@ impl Http1Transaction for Client {
                 version,
                 subject: status,
                 headers,
+                extensions: http::Extensions::default(),
             };
             if let Some((decode, is_upgrade)) = Client::decoder(&head, ctx.req_method)? {
                 return Ok(Some(ParsedMessage {
@@ -687,6 +726,12 @@ impl Http1Transaction for Client {
                     keep_alive: keep_alive && !is_upgrade,
                     wants_upgrade: is_upgrade,
                 }));
+            }
+
+            // Parsing a 1xx response could have consumed the buffer, check if
+            // it is empty now...
+            if buf.is_empty() {
+                return Ok(None);
             }
         }
     }
@@ -714,7 +759,7 @@ impl Http1Transaction for Client {
             Version::HTTP_10 => extend(dst, b"HTTP/1.0"),
             Version::HTTP_11 => extend(dst, b"HTTP/1.1"),
             Version::HTTP_2 => {
-                warn!("request with HTTP2 version coerced to HTTP/1.1");
+                debug!("request with HTTP2 version coerced to HTTP/1.1");
                 extend(dst, b"HTTP/1.1");
             }
             other => panic!("unexpected request version: {:?}", other),
@@ -742,6 +787,7 @@ impl Http1Transaction for Client {
     }
 }
 
+#[cfg(feature = "client")]
 impl Client {
     /// Returns Some(length, wants_upgrade) if successful.
     ///
@@ -809,9 +855,6 @@ impl Client {
             Ok(Some((DecodedLength::CLOSE_DELIMITED, false)))
         }
     }
-}
-
-impl Client {
     fn set_length(head: &mut RequestHead, body: Option<BodyLength>) -> Encoder {
         let body = if let Some(body) = body {
             body
@@ -825,7 +868,7 @@ impl Client {
         let headers = &mut head.headers;
 
         // If the user already set specific headers, we should respect them, regardless
-        // of what the Payload knows about itself. They set them for a reason.
+        // of what the HttpBody knows about itself. They set them for a reason.
 
         // Because of the borrow checker, we can't check the for an existing
         // Content-Length header while holding an `Entry` for the Transfer-Encoding

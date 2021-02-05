@@ -4,7 +4,7 @@ use wasm_bindgen::prelude::*;
 #[cfg(web_sys_unstable_apis)]
 #[wasm_bindgen]
 extern "C" {
-    # [ wasm_bindgen ( extends = :: js_sys :: Object , js_name = GPUExtent3DDict ) ]
+    # [wasm_bindgen (extends = :: js_sys :: Object , js_name = GPUExtent3DDict)]
     #[derive(Debug, Clone, PartialEq, Eq)]
     #[doc = "The `GpuExtent3dDict` dictionary."]
     #[doc = ""]
@@ -22,12 +22,9 @@ impl GpuExtent3dDict {
     #[doc = ""]
     #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
     #[doc = "[described in the `wasm-bindgen` guide](https://rustwasm.github.io/docs/wasm-bindgen/web-sys/unstable-apis.html)*"]
-    pub fn new(depth: u32, height: u32, width: u32) -> Self {
+    pub fn new() -> Self {
         #[allow(unused_mut)]
         let mut ret: Self = ::wasm_bindgen::JsCast::unchecked_into(::js_sys::Object::new());
-        ret.depth(depth);
-        ret.height(height);
-        ret.width(width);
         ret
     }
     #[cfg(web_sys_unstable_apis)]

@@ -23,7 +23,7 @@
 
 #![allow(non_snake_case)]
 
-use crate::windows::*;
+use super::windows::*;
 use core::mem;
 use core::ptr;
 
@@ -254,7 +254,6 @@ pub struct Init {
 /// Note that this function is **safe**, it internally has its own
 /// synchronization. Also note that it is safe to call this function multiple
 /// times recursively.
-#[cfg(all(windows, feature = "dbghelp"))]
 pub fn init() -> Result<Init, ()> {
     use core::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 

@@ -6,7 +6,9 @@ use std::{cmp, iter};
 use std::fs::{OpenOptions};
 use std::os::unix::io::AsRawFd;
 
-use tempfile::{tempfile, tempdir};
+#[cfg(not(target_os = "redox"))]
+use tempfile::tempfile;
+use tempfile::tempdir;
 
 #[test]
 fn test_writev() {
@@ -53,6 +55,7 @@ fn test_writev() {
 }
 
 #[test]
+#[cfg(not(target_os = "redox"))]
 fn test_readv() {
     let s:String = thread_rng().sample_iter(&Alphanumeric).take(128).collect();
     let to_write = s.as_bytes().to_vec();
@@ -97,6 +100,7 @@ fn test_readv() {
 }
 
 #[test]
+#[cfg(not(target_os = "redox"))]
 fn test_pwrite() {
     use std::io::Read;
 
@@ -201,7 +205,7 @@ fn test_process_vm_readv() {
     use nix::sys::wait::*;
 
     require_capability!(CAP_SYS_PTRACE);
-    let _ = ::FORK_MTX.lock().expect("Mutex got poisoned by another test");
+    let _ = crate::FORK_MTX.lock().expect("Mutex got poisoned by another test");
 
     // Pre-allocate memory in the child, since allocation isn't safe
     // post-fork (~= async-signal-safe)

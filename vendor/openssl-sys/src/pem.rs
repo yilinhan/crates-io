@@ -19,6 +19,13 @@ extern "C" {
         user_data: *mut c_void,
     ) -> *mut X509;
     pub fn PEM_write_bio_X509(bio: *mut BIO, x509: *mut X509) -> c_int;
+    pub fn PEM_read_bio_X509_CRL(
+        bio: *mut BIO,
+        out: *mut *mut X509_CRL,
+        callback: pem_password_cb,
+        user_data: *mut c_void,
+    ) -> *mut X509_CRL;
+    pub fn PEM_write_bio_X509_CRL(bio: *mut BIO, x509: *mut X509_CRL) -> c_int;
     pub fn PEM_read_bio_X509_REQ(
         bio: *mut BIO,
         out: *mut *mut X509_REQ,
@@ -92,6 +99,13 @@ extern "C" {
         callback: pem_password_cb,
         user_data: *mut c_void,
     ) -> c_int;
+    pub fn PEM_read_bio_EC_PUBKEY(
+        bp: *mut BIO,
+        ec: *mut *mut EC_KEY,
+        callback: pem_password_cb,
+        user_data: *mut c_void,
+    ) -> *mut EC_KEY;
+    pub fn PEM_write_bio_EC_PUBKEY(bp: *mut BIO, ec: *mut EC_KEY) -> c_int;
     pub fn PEM_read_bio_DHparams(
         bio: *mut BIO,
         out: *mut *mut DH,
@@ -142,9 +156,7 @@ extern "C" {
         buf: *mut *const u8,
         length: c_long,
     ) -> *mut PKCS8_PRIV_KEY_INFO;
-    pub fn PKCS8_PRIV_KEY_INFO_free(
-        p8inf: *mut PKCS8_PRIV_KEY_INFO,
-    );
+    pub fn PKCS8_PRIV_KEY_INFO_free(p8inf: *mut PKCS8_PRIV_KEY_INFO);
 
     pub fn PEM_read_bio_PKCS7(
         bio: *mut BIO,

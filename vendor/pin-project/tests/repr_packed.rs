@@ -1,7 +1,5 @@
-#![warn(unsafe_code)]
 #![warn(rust_2018_idioms, single_use_lifetimes)]
-#![allow(dead_code)]
-#![deny(safe_packed_borrows)]
+#![forbid(safe_packed_borrows)]
 
 use std::cell::Cell;
 
@@ -24,11 +22,11 @@ fn weird_repr_packed() {
     }
 
     #[repr(packed)]
-    struct Foo {
+    struct Struct {
         field: u8,
     }
 
-    impl Drop for Foo {
+    impl Drop for Struct {
         fn drop(&mut self) {
             FIELD_ADDR.with(|f| {
                 f.set(&self.field as *const u8 as usize);
@@ -36,14 +34,15 @@ fn weird_repr_packed() {
         }
     }
 
+    #[allow(clippy::let_and_return)]
     let field_addr = {
         // We let this field drop by going out of scope,
         // rather than explicitly calling drop(foo).
         // Calling drop(foo) causes 'foo' to be moved
         // into the 'drop' function, resulting in a different
         // address.
-        let foo = Foo { field: 27 };
-        let field_addr = &foo.field as *const u8 as usize;
+        let x = Struct { field: 27 };
+        let field_addr = &x.field as *const u8 as usize;
         field_addr
     };
     assert_eq!(field_addr, FIELD_ADDR.with(|f| f.get()));

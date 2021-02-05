@@ -51,16 +51,7 @@ impl fmt::Display for DecoderError {
     }
 }
 
-impl Error for DecoderError {
-    fn description(&self) -> &str {
-        use self::DecoderError::*;
-        match *self {
-            DecodeNotImplemented(ref s) | DeserializerError(ref s) | ParseError(ref s) => s,
-            IoError(ref e) => e.description(),
-            NoFieldName => "No field name",
-        }
-    }
-}
+impl Error for DecoderError {}
 
 impl From<io::Error> for DecoderError {
     fn from(err: io::Error) -> DecoderError {
@@ -101,7 +92,7 @@ impl Decoder {
 
     fn new(key: RegKey) -> Decoder {
         Decoder {
-            key: key,
+            key,
             f_name: None,
             reading_state: DecoderReadingState::WaitingForKey,
             enumeration_state: DecoderEnumerationState::EnumeratingKeys(0),

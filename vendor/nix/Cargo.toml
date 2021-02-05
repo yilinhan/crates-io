@@ -11,8 +11,9 @@
 # will likely look very different (and much more reasonable)
 
 [package]
+edition = "2018"
 name = "nix"
-version = "0.17.0"
+version = "0.18.0"
 authors = ["The nix-rust Project Developers"]
 exclude = ["/.gitignore", "/.travis.yml", "/ci/*", "/Cross.toml", "/RELEASE_PROCEDURE.md", "/bors.toml"]
 description = "Rust friendly bindings to *nix APIs"
@@ -27,6 +28,10 @@ path = "test/test.rs"
 [[test]]
 name = "test-aio-drop"
 path = "test/sys/test_aio_drop.rs"
+
+[[test]]
+name = "test-clearenv"
+path = "test/test_clearenv.rs"
 
 [[test]]
 name = "test-lio-listio-resubmit"
@@ -44,14 +49,11 @@ path = "test/test_ptymaster_drop.rs"
 version = "1.1"
 
 [dependencies.cfg-if]
-version = "0.1.2"
+version = "0.1.10"
 
 [dependencies.libc]
-version = "0.2.60"
+version = "0.2.73"
 features = ["extra_traits"]
-
-[dependencies.void]
-version = "1.0.2"
 [dev-dependencies.bytes]
 version = "0.4.8"
 
@@ -60,6 +62,9 @@ version = "1.2"
 
 [dev-dependencies.rand]
 version = "0.6"
+
+[dev-dependencies.semver]
+version = "0.9.0"
 
 [dev-dependencies.tempfile]
 version = "3.0.5"

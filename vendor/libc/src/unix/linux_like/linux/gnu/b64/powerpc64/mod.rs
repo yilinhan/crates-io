@@ -190,6 +190,12 @@ s! {
         pub ss_flags: ::c_int,
         pub ss_size: ::size_t
     }
+
+    pub struct ip_mreqn {
+        pub imr_multiaddr: ::in_addr,
+        pub imr_address: ::in_addr,
+        pub imr_ifindex: ::c_int,
+    }
 }
 
 pub const POSIX_FADV_DONTNEED: ::c_int = 4;
@@ -441,6 +447,8 @@ pub const TIOCMBIS: ::c_ulong = 0x5416;
 pub const TIOCMBIC: ::c_ulong = 0x5417;
 pub const TIOCMSET: ::c_ulong = 0x5418;
 pub const TIOCCONS: ::c_ulong = 0x541D;
+pub const TIOCSBRK: ::c_ulong = 0x5427;
+pub const TIOCCBRK: ::c_ulong = 0x5428;
 pub const TIOCGRS485: ::c_int = 0x542E;
 pub const TIOCSRS485: ::c_int = 0x542F;
 
@@ -544,7 +552,7 @@ pub const O_DIRECT: ::c_int = 0x20000;
 
 pub const MAP_LOCKED: ::c_int = 0x00080;
 pub const MAP_NORESERVE: ::c_int = 0x00040;
-pub const MAP_SYNC : ::c_int = 0x080000;
+pub const MAP_SYNC: ::c_int = 0x080000;
 
 pub const EDEADLOCK: ::c_int = 58;
 pub const EUCLEAN: ::c_int = 117;
@@ -1035,8 +1043,9 @@ pub const SYS_preadv2: ::c_long = 380;
 pub const SYS_pwritev2: ::c_long = 381;
 pub const SYS_kexec_file_load: ::c_long = 382;
 pub const SYS_statx: ::c_long = 383;
+pub const SYS_pidfd_open: ::c_long = 434;
+pub const SYS_clone3: ::c_long = 435;
 
-#[link(name = "util")]
 extern "C" {
     pub fn sysctl(
         name: *mut ::c_int,

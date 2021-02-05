@@ -2,7 +2,8 @@
 #![cfg(feature = "full")]
 
 use tokio::fs::File;
-use tokio::prelude::*;
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
+use tokio_test::task;
 
 use std::io::prelude::*;
 use tempfile::NamedTempFile;
@@ -34,6 +35,44 @@ async fn basic_write() {
 
     let file = std::fs::read(tempfile.path()).unwrap();
     assert_eq!(file, HELLO);
+}
+
+#[tokio::test]
+async fn basic_write_and_shutdown() {
+    let tempfile = tempfile();
+
+    let mut file = File::create(tempfile.path()).await.unwrap();
+
+    file.write_all(HELLO).await.unwrap();
+    file.shutdown().await.unwrap();
+
+    let file = std::fs::read(tempfile.path()).unwrap();
+    assert_eq!(file, HELLO);
+}
+
+#[tokio::test]
+async fn coop() {
+    let mut tempfile = tempfile();
+    tempfile.write_all(HELLO).unwrap();
+
+    let mut task = task::spawn(async {
+        let mut file = File::open(tempfile.path()).await.unwrap();
+
+        let mut buf = [0; 1024];
+
+        loop {
+            file.read(&mut buf).await.unwrap();
+            file.seek(std::io::SeekFrom::Start(0)).await.unwrap();
+        }
+    });
+
+    for _ in 0..1_000 {
+        if task.poll().is_pending() {
+            return;
+        }
+    }
+
+    panic!("did not yield");
 }
 
 fn tempfile() -> NamedTempFile {

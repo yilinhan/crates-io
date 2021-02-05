@@ -1,4 +1,4 @@
-// NB: If you change this test, change 'marker_trait_attr-feature-gate.rs' at the same time.
+// Note: If you change this test, change 'marker_trait_attr-feature-gate.rs' at the same time.
 
 // marker_trait_attr
 // Tracking issue: https://github.com/rust-lang/rust/issues/29864
@@ -12,7 +12,7 @@ use std::marker::PhantomPinned;
 #[pin_project] //~ ERROR E0119
 struct Struct<T> {
     #[pin]
-    x: T,
+    f: T,
 }
 
 // unsound Unpin impl

@@ -11,7 +11,11 @@ pub const EVP_PKEY_DSA: c_int = NID_dsa;
 pub const EVP_PKEY_DH: c_int = NID_dhKeyAgreement;
 pub const EVP_PKEY_EC: c_int = NID_X9_62_id_ecPublicKey;
 #[cfg(ossl111)]
+pub const EVP_PKEY_X25519: c_int = NID_X25519;
+#[cfg(ossl111)]
 pub const EVP_PKEY_ED25519: c_int = NID_ED25519;
+#[cfg(ossl111)]
+pub const EVP_PKEY_X448: c_int = NID_X448;
 #[cfg(ossl111)]
 pub const EVP_PKEY_ED448: c_int = NID_ED448;
 pub const EVP_PKEY_HMAC: c_int = NID_hmac;
@@ -167,18 +171,12 @@ extern "C" {
     pub fn EVP_DecryptFinal_ex(
         ctx: *mut EVP_CIPHER_CTX,
         outm: *mut c_uchar,
-        outl: *mut c_int
+        outl: *mut c_int,
     ) -> c_int;
 }
-cfg_if! {
-    if #[cfg(any(ossl111b, libressl280))] {
-        extern "C" {
-            pub fn EVP_PKEY_size(pkey: *const EVP_PKEY) -> c_int;
-        }
-    } else {
-        extern "C" {
-            pub fn EVP_PKEY_size(pkey: *mut EVP_PKEY) -> c_int;
-        }
+const_ptr_api! {
+    extern "C" {
+        pub fn EVP_PKEY_size(pkey: #[const_ptr_if(any(ossl111b, libressl280))] EVP_PKEY) -> c_int;
     }
 }
 cfg_if! {
@@ -202,23 +200,13 @@ cfg_if! {
         }
     }
 }
-cfg_if! {
-    if #[cfg(any(ossl102, libressl280))] {
-        extern "C" {
-            pub fn EVP_DigestVerifyFinal(
-                ctx: *mut EVP_MD_CTX,
-                sigret: *const c_uchar,
-                siglen: size_t,
-            ) -> c_int;
-        }
-    } else {
-        extern "C" {
-            pub fn EVP_DigestVerifyFinal(
-                ctx: *mut EVP_MD_CTX,
-                sigret: *mut c_uchar,
-                siglen: size_t,
-            ) -> c_int;
-        }
+const_ptr_api! {
+    extern "C" {
+        pub fn EVP_DigestVerifyFinal(
+            ctx: *mut EVP_MD_CTX,
+            sigret: #[const_ptr_if(any(ossl102, libressl280))] c_uchar,
+            siglen: size_t,
+        ) -> c_int;
     }
 }
 
@@ -275,6 +263,8 @@ extern "C" {
     pub fn EVP_aes_128_gcm() -> *const EVP_CIPHER;
     pub fn EVP_aes_128_xts() -> *const EVP_CIPHER;
     pub fn EVP_aes_128_ofb() -> *const EVP_CIPHER;
+    #[cfg(ossl110)]
+    pub fn EVP_aes_128_ocb() -> *const EVP_CIPHER;
     pub fn EVP_aes_192_ecb() -> *const EVP_CIPHER;
     pub fn EVP_aes_192_cbc() -> *const EVP_CIPHER;
     pub fn EVP_aes_192_cfb1() -> *const EVP_CIPHER;
@@ -284,6 +274,8 @@ extern "C" {
     pub fn EVP_aes_192_ccm() -> *const EVP_CIPHER;
     pub fn EVP_aes_192_gcm() -> *const EVP_CIPHER;
     pub fn EVP_aes_192_ofb() -> *const EVP_CIPHER;
+    #[cfg(ossl110)]
+    pub fn EVP_aes_192_ocb() -> *const EVP_CIPHER;
     pub fn EVP_aes_256_ecb() -> *const EVP_CIPHER;
     pub fn EVP_aes_256_cbc() -> *const EVP_CIPHER;
     pub fn EVP_aes_256_cfb1() -> *const EVP_CIPHER;
@@ -294,6 +286,8 @@ extern "C" {
     pub fn EVP_aes_256_gcm() -> *const EVP_CIPHER;
     pub fn EVP_aes_256_xts() -> *const EVP_CIPHER;
     pub fn EVP_aes_256_ofb() -> *const EVP_CIPHER;
+    #[cfg(ossl110)]
+    pub fn EVP_aes_256_ocb() -> *const EVP_CIPHER;
     #[cfg(ossl110)]
     pub fn EVP_chacha20() -> *const ::EVP_CIPHER;
     #[cfg(ossl110)]
@@ -307,15 +301,9 @@ extern "C" {
 
     pub fn EVP_PKEY_id(pkey: *const EVP_PKEY) -> c_int;
 }
-cfg_if! {
-    if #[cfg(any(ossl110, libressl280))] {
-        extern "C" {
-            pub fn EVP_PKEY_bits(key: *const EVP_PKEY) -> c_int;
-        }
-    } else {
-        extern "C" {
-            pub fn EVP_PKEY_bits(key: *mut EVP_PKEY) -> c_int;
-        }
+const_ptr_api! {
+    extern "C" {
+        pub fn EVP_PKEY_bits(key: #[const_ptr_if(any(ossl110, libressl280))] EVP_PKEY) -> c_int;
     }
 }
 extern "C" {
@@ -427,16 +415,56 @@ extern "C" {
 
     pub fn EVP_PKEY_keygen_init(ctx: *mut EVP_PKEY_CTX) -> c_int;
     pub fn EVP_PKEY_keygen(ctx: *mut EVP_PKEY_CTX, key: *mut *mut EVP_PKEY) -> c_int;
+
+    pub fn EVP_PKEY_encrypt_init(ctx: *mut EVP_PKEY_CTX) -> c_int;
+    pub fn EVP_PKEY_encrypt(
+        ctx: *mut EVP_PKEY_CTX,
+        pout: *mut c_uchar,
+        poutlen: *mut size_t,
+        pin: *const c_uchar,
+        pinlen: size_t,
+    ) -> c_int;
+    pub fn EVP_PKEY_decrypt_init(ctx: *mut EVP_PKEY_CTX) -> c_int;
+    pub fn EVP_PKEY_decrypt(
+        ctx: *mut EVP_PKEY_CTX,
+        pout: *mut c_uchar,
+        poutlen: *mut size_t,
+        pin: *const c_uchar,
+        pinlen: size_t,
+    ) -> c_int;
+}
+
+const_ptr_api! {
+    extern "C" {
+        pub fn EVP_PKCS82PKEY(p8: #[const_ptr_if(any(ossl110, libressl280))] PKCS8_PRIV_KEY_INFO) -> *mut EVP_PKEY;
+    }
 }
 
 cfg_if! {
-    if #[cfg(any(ossl110, libressl280))] {
+    if #[cfg(any(ossl111))] {
         extern "C" {
-            pub fn EVP_PKCS82PKEY(p8: *const PKCS8_PRIV_KEY_INFO) -> *mut EVP_PKEY;
-        }
-    } else {
-        extern "C" {
-            pub fn EVP_PKCS82PKEY(p8: *mut PKCS8_PRIV_KEY_INFO) -> *mut EVP_PKEY;
+            pub fn EVP_PKEY_get_raw_public_key(
+                pkey: *const EVP_PKEY,
+                ppub: *mut c_uchar,
+                len: *mut size_t,
+            ) -> c_int;
+            pub fn EVP_PKEY_new_raw_public_key(
+                ttype: c_int,
+                e: *mut ENGINE,
+                key: *const c_uchar,
+                keylen: size_t,
+            ) -> *mut EVP_PKEY;
+            pub fn EVP_PKEY_get_raw_private_key(
+                pkey: *const EVP_PKEY,
+                ppriv: *mut c_uchar,
+                len: *mut size_t,
+            ) -> c_int;
+            pub fn EVP_PKEY_new_raw_private_key(
+                ttype: c_int,
+                e: *mut ENGINE,
+                key: *const c_uchar,
+                keylen: size_t,
+            ) -> *mut EVP_PKEY;
         }
     }
 }

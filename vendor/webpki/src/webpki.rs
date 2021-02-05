@@ -14,8 +14,6 @@
 
 //! webpki: Web PKI X.509 Certificate Validation.
 //!
-//! <code>git clone https://github.com/briansmith/webpki</code>
-//!
 //! See `EndEntityCert`'s documentation for a description of the certificate
 //! processing steps necessary for a TLS connection.
 
@@ -236,7 +234,7 @@ impl<'a> EndEntityCert<'a> {
     ) -> Result<(), Error> {
         signed_data::verify_signature(
             signature_alg,
-            self.inner.spki,
+            self.inner.spki.value(),
             untrusted::Input::from(msg),
             untrusted::Input::from(signature),
         )

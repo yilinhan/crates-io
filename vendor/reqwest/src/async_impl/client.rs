@@ -1,6 +1,6 @@
 #[cfg(any(
     feature = "native-tls",
-    feature = "rustls-tls",
+    feature = "__rustls",
 ))]
 use std::any::Any;
 use std::convert::TryInto;
@@ -21,10 +21,13 @@ use http::Uri;
 use hyper::client::ResponseFuture;
 #[cfg(feature = "native-tls-crate")]
 use native_tls_crate::TlsConnector;
+#[cfg(feature = "rustls-tls-native-roots")]
+use rustls::RootCertStore;
 use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::time::Delay;
+use pin_project_lite::pin_project;
 
 use log::debug;
 
@@ -35,6 +38,7 @@ use super::Body;
 use crate::connect::{Connector, HttpConnector};
 #[cfg(feature = "cookies")]
 use crate::cookie;
+use crate::error;
 use crate::into_url::{expect_uri, try_uri};
 use crate::redirect::{self, remove_sensitive_headers};
 #[cfg(feature = "__tls")]
@@ -51,12 +55,18 @@ use crate::{IntoUrl, Method, Proxy, StatusCode, Url};
 ///
 /// The `Client` holds a connection pool internally, so it is advised that
 /// you create one and **reuse** it.
+///
+/// You do **not** have to wrap the `Client` it in an [`Rc`] or [`Arc`] to **reuse** it,
+/// because it already uses an [`Arc`] internally.
+///
+/// [`Rc`]: std::rc::Rc
 #[derive(Clone)]
 pub struct Client {
     inner: Arc<ClientRef>,
 }
 
 /// A `ClientBuilder` can be used to create a `Client` with  custom configuration.
+#[must_use]
 pub struct ClientBuilder {
     config: Config,
 }
@@ -71,7 +81,9 @@ struct Config {
     certs_verification: bool,
     connect_timeout: Option<Duration>,
     connection_verbose: bool,
-    max_idle_per_host: usize,
+    pool_idle_timeout: Option<Duration>,
+    pool_max_idle_per_host: usize,
+    tcp_keepalive: Option<Duration>,
     #[cfg(feature = "__tls")]
     identity: Option<Identity>,
     proxies: Vec<Proxy>,
@@ -84,6 +96,7 @@ struct Config {
     #[cfg(feature = "__tls")]
     tls: TlsBackend,
     http2_only: bool,
+    http1_writev: Option<bool>,
     http1_title_case_headers: bool,
     http2_initial_stream_window_size: Option<u32>,
     http2_initial_connection_window_size: Option<u32>,
@@ -93,6 +106,7 @@ struct Config {
     cookie_store: Option<cookie::CookieStore>,
     trust_dns: bool,
     error: Option<crate::Error>,
+    https_only: bool,
 }
 
 impl Default for ClientBuilder {
@@ -120,7 +134,11 @@ impl ClientBuilder {
                 certs_verification: true,
                 connect_timeout: None,
                 connection_verbose: false,
-                max_idle_per_host: std::usize::MAX,
+                pool_idle_timeout: Some(Duration::from_secs(90)),
+                pool_max_idle_per_host: std::usize::MAX,
+                // TODO: Re-enable default duration once hyper's HttpConnector is fixed
+                // to no longer error when an option fails.
+                tcp_keepalive: None, //Some(Duration::from_secs(60)),
                 proxies: Vec::new(),
                 auto_sys_proxy: true,
                 redirect_policy: redirect::Policy::default(),
@@ -133,14 +151,16 @@ impl ClientBuilder {
                 #[cfg(feature = "__tls")]
                 tls: TlsBackend::default(),
                 http2_only: false,
+                http1_writev: None,
                 http1_title_case_headers: false,
                 http2_initial_stream_window_size: None,
                 http2_initial_connection_window_size: None,
                 local_address: None,
-                nodelay: false,
+                nodelay: true,
                 trust_dns: cfg!(feature = "trust-dns"),
                 #[cfg(feature = "cookies")]
                 cookie_store: None,
+                https_only: false,
             },
         }
     }
@@ -222,7 +242,7 @@ impl ClientBuilder {
                         config.local_address,
                         config.nodelay)
                 },
-                #[cfg(feature = "rustls-tls")]
+                #[cfg(feature = "__rustls")]
                 TlsBackend::BuiltRustls(conn) => {
                     Connector::new_rustls_tls(
                         http,
@@ -232,7 +252,7 @@ impl ClientBuilder {
                         config.local_address,
                         config.nodelay)
                 },
-                #[cfg(feature = "rustls-tls")]
+                #[cfg(feature = "__rustls")]
                 TlsBackend::Rustls => {
                     use crate::tls::NoVerifier;
 
@@ -242,8 +262,14 @@ impl ClientBuilder {
                     } else {
                         tls.set_protocols(&["h2".into(), "http/1.1".into()]);
                     }
+                    #[cfg(feature = "rustls-tls-webpki-roots")]
                     tls.root_store
                         .add_server_trust_anchors(&webpki_roots::TLS_SERVER_ROOTS);
+                    #[cfg(feature = "rustls-tls-native-roots")]
+                    {
+                        let roots_slice = NATIVE_ROOTS.as_ref().unwrap().roots.as_slice();
+                        tls.root_store.roots.extend_from_slice(roots_slice);
+                    }
 
                     if !config.certs_verification {
                         tls.dangerous()
@@ -269,7 +295,7 @@ impl ClientBuilder {
                 },
                 #[cfg(any(
                     feature = "native-tls",
-                    feature = "rustls-tls",
+                    feature = "__rustls",
                 ))]
                 TlsBackend::UnknownPreconfigured => {
                     return Err(crate::error::builder(
@@ -290,6 +316,10 @@ impl ClientBuilder {
             builder.http2_only(true);
         }
 
+        if let Some(http1_writev) = config.http1_writev {
+            builder.http1_writev(http1_writev);
+        }
+
         if let Some(http2_initial_stream_window_size) = config.http2_initial_stream_window_size {
             builder.http2_initial_stream_window_size(http2_initial_stream_window_size);
         }
@@ -299,7 +329,9 @@ impl ClientBuilder {
             builder.http2_initial_connection_window_size(http2_initial_connection_window_size);
         }
 
-        builder.pool_max_idle_per_host(config.max_idle_per_host);
+        builder.pool_idle_timeout(config.pool_idle_timeout);
+        builder.pool_max_idle_per_host(config.pool_max_idle_per_host);
+        connector.set_keepalive(config.tcp_keepalive);
 
         if config.http1_title_case_headers {
             builder.http1_title_case_headers(true);
@@ -321,6 +353,7 @@ impl ClientBuilder {
                 request_timeout: config.timeout,
                 proxies,
                 proxies_maybe_http_auth,
+                https_only: config.https_only,
             }),
         })
     }
@@ -556,8 +589,8 @@ impl ClientBuilder {
 
     /// Enables a request timeout.
     ///
-    /// The timeout is applied from the when the request starts connecting
-    /// until the response body has finished.
+    /// The timeout is applied from when the request starts connecting until the
+    /// response body has finished.
     ///
     /// Default is no timeout.
     pub fn timeout(mut self, timeout: Duration) -> ClientBuilder {
@@ -591,15 +624,42 @@ impl ClientBuilder {
 
     // HTTP options
 
-    /// Sets the maximum idle connection per host allowed in the pool.
-    pub fn max_idle_per_host(mut self, max: usize) -> ClientBuilder {
-        self.config.max_idle_per_host = max;
+    /// Set an optional timeout for idle sockets being kept-alive.
+    ///
+    /// Pass `None` to disable timeout.
+    ///
+    /// Default is 90 seconds.
+    pub fn pool_idle_timeout<D>(mut self, val: D) -> ClientBuilder
+    where
+        D: Into<Option<Duration>>,
+    {
+        self.config.pool_idle_timeout = val.into();
         self
+    }
+
+    /// Sets the maximum idle connection per host allowed in the pool.
+    pub fn pool_max_idle_per_host(mut self, max: usize) -> ClientBuilder {
+        self.config.pool_max_idle_per_host = max;
+        self
+    }
+
+    #[doc(hidden)]
+    #[deprecated(note = "renamed to `pool_max_idle_per_host`")]
+    pub fn max_idle_per_host(self, max: usize) -> ClientBuilder {
+        self.pool_max_idle_per_host(max)
     }
 
     /// Enable case sensitive headers.
     pub fn http1_title_case_headers(mut self) -> ClientBuilder {
         self.config.http1_title_case_headers = true;
+        self
+    }
+
+    /// Force hyper to use either queued(if true), or flattened(if false) write strategy
+    /// This may eliminate unnecessary cloning of buffers for some TLS backends
+    /// By default hyper will try to guess which strategy to use
+    pub fn http1_writev(mut self, writev: bool) -> ClientBuilder {
+        self.config.http1_writev = Some(writev);
         self
     }
 
@@ -630,9 +690,23 @@ impl ClientBuilder {
 
     // TCP options
 
-    /// Set that all sockets have `SO_NODELAY` set to `true`.
-    pub fn tcp_nodelay(mut self) -> ClientBuilder {
-        self.config.nodelay = true;
+    #[doc(hidden)]
+    #[deprecated(note = "tcp_nodelay is enabled by default, use `tcp_nodelay_` to disable")]
+    pub fn tcp_nodelay(self) -> ClientBuilder {
+        self.tcp_nodelay_(true)
+    }
+
+    /// Set whether sockets have `SO_NODELAY` enabled.
+    ///
+    /// Default is `true`.
+    // NOTE: Regarding naming (trailing underscore):
+    //
+    // Due to the original `tcp_nodelay()` not taking an argument, changing
+    // the default means a user has no way of *disabling* this feature.
+    //
+    // TODO(v0.11.x): Remove trailing underscore.
+    pub fn tcp_nodelay_(mut self, enabled: bool) -> ClientBuilder {
+        self.config.nodelay = enabled;
         self
     }
 
@@ -655,6 +729,17 @@ impl ClientBuilder {
         self
     }
 
+    /// Set that all sockets have `SO_KEEPALIVE` set with the supplied duration.
+    ///
+    /// If `None`, the option will not be set.
+    pub fn tcp_keepalive<D>(mut self, val: D) -> ClientBuilder
+        where
+            D: Into<Option<Duration>>,
+    {
+        self.config.tcp_keepalive = val.into();
+        self
+    }
+
     // TLS options
 
     /// Add a custom root certificate.
@@ -664,7 +749,7 @@ impl ClientBuilder {
     ///
     /// # Optional
     ///
-    /// This requires the optional `default-tls`, `native-tls`, or `rustls-tls`
+    /// This requires the optional `default-tls`, `native-tls`, or `rustls-tls(-...)`
     /// feature to be enabled.
     #[cfg(feature = "__tls")]
     pub fn add_root_certificate(mut self, cert: Certificate) -> ClientBuilder {
@@ -676,7 +761,7 @@ impl ClientBuilder {
     ///
     /// # Optional
     ///
-    /// This requires the optional `native-tls` or `rustls-tls` feature to be
+    /// This requires the optional `native-tls` or `rustls-tls(-...)` feature to be
     /// enabled.
     #[cfg(feature = "__tls")]
     pub fn identity(mut self, identity: Identity) -> ClientBuilder {
@@ -721,7 +806,7 @@ impl ClientBuilder {
     ///
     /// # Optional
     ///
-    /// This requires the optional `default-tls`, `native-tls`, or `rustls-tls`
+    /// This requires the optional `default-tls`, `native-tls`, or `rustls-tls(-...)`
     /// feature to be enabled.
     #[cfg(feature = "__tls")]
     pub fn danger_accept_invalid_certs(mut self, accept_invalid_certs: bool) -> ClientBuilder {
@@ -750,8 +835,8 @@ impl ClientBuilder {
     ///
     /// # Optional
     ///
-    /// This requires the optional `rustls-tls` feature to be enabled.
-    #[cfg(feature = "rustls-tls")]
+    /// This requires the optional `rustls-tls(-...)` feature to be enabled.
+    #[cfg(feature = "__rustls")]
     pub fn use_rustls_tls(mut self) -> ClientBuilder {
         self.config.tls = TlsBackend::Rustls;
         self
@@ -774,10 +859,10 @@ impl ClientBuilder {
     /// # Optional
     ///
     /// This requires one of the optional features `native-tls` or
-    /// `rustls-tls` to be enabled.
+    /// `rustls-tls(-...)` to be enabled.
     #[cfg(any(
         feature = "native-tls",
-        feature = "rustls-tls",
+        feature = "__rustls",
     ))]
     pub fn use_preconfigured_tls(mut self, tls: impl Any) -> ClientBuilder {
         let mut tls = Some(tls);
@@ -790,7 +875,7 @@ impl ClientBuilder {
                 return self;
             }
         }
-        #[cfg(feature = "rustls-tls")]
+        #[cfg(feature = "__rustls")]
         {
             if let Some(conn) = (&mut tls as &mut dyn Any).downcast_mut::<Option<rustls::ClientConfig>>() {
 
@@ -834,6 +919,14 @@ impl ClientBuilder {
         {
             self
         }
+    }
+
+    /// Restrict the Client to be used with HTTPS only requests.
+    /// 
+    /// Defaults to false.
+    pub fn https_only(mut self, enabled: bool) -> ClientBuilder {
+        self.config.https_only = enabled;
+        self
     }
 }
 
@@ -954,6 +1047,14 @@ impl Client {
 
     pub(super) fn execute_request(&self, req: Request) -> Pending {
         let (method, url, mut headers, body, timeout) = req.pieces();
+        if url.scheme() != "http" && url.scheme() != "https" {
+            return Pending::new_err(error::url_bad_scheme(url));
+        }
+
+        // check if we're in https_only mode and check the scheme of the current URL
+        if self.inner.https_only && url.scheme() != "https" {
+            return Pending::new_err(error::url_bad_scheme(url));
+        }
 
         // insert default headers in the request headers
         // without overwriting already appended headers.
@@ -976,14 +1077,10 @@ impl Client {
 
         let accept_encoding = self.inner.accepts.as_str();
 
-        if accept_encoding.is_some()
-            && !headers.contains_key(ACCEPT_ENCODING)
-            && !headers.contains_key(RANGE)
-        {
-            headers.insert(
-                ACCEPT_ENCODING,
-                HeaderValue::from_static(accept_encoding.unwrap()),
-            );
+        if let Some(accept_encoding) = accept_encoding {
+            if !headers.contains_key(ACCEPT_ENCODING) && !headers.contains_key(RANGE) {
+                headers.insert(ACCEPT_ENCODING, HeaderValue::from_static(accept_encoding));
+            }
         }
 
         let uri = expect_uri(&url);
@@ -1000,13 +1097,13 @@ impl Client {
 
         let mut req = hyper::Request::builder()
             .method(method.clone())
-            .uri(uri.clone())
+            .uri(uri)
             .body(body.into_stream())
             .expect("valid request parts");
 
         let timeout = timeout
             .or(self.inner.request_timeout)
-            .map(|dur| tokio::time::delay_for(dur));
+            .map(tokio::time::delay_for);
 
         *req.headers_mut() = headers.clone();
 
@@ -1139,7 +1236,7 @@ impl Config {
             }
         }
 
-        #[cfg(all(feature = "native-tls-crate", feature = "rustls-tls"))]
+        #[cfg(all(feature = "native-tls-crate", feature = "__rustls"))]
         {
             f.field("tls_backend", &self.tls);
         }
@@ -1157,6 +1254,7 @@ struct ClientRef {
     request_timeout: Option<Duration>,
     proxies: Arc<Vec<Proxy>>,
     proxies_maybe_http_auth: bool,
+    https_only: bool,
 }
 
 impl ClientRef {
@@ -1193,8 +1291,11 @@ impl ClientRef {
     }
 }
 
-pub(super) struct Pending {
-    inner: PendingInner,
+pin_project! {
+    pub(super) struct Pending {
+        #[pin]
+        inner: PendingInner,
+    }
 }
 
 enum PendingInner {
@@ -1202,35 +1303,39 @@ enum PendingInner {
     Error(Option<crate::Error>),
 }
 
-struct PendingRequest {
-    method: Method,
-    url: Url,
-    headers: HeaderMap,
-    body: Option<Option<Bytes>>,
+pin_project! {
+    struct PendingRequest {
+        method: Method,
+        url: Url,
+        headers: HeaderMap,
+        body: Option<Option<Bytes>>,
 
-    urls: Vec<Url>,
+        urls: Vec<Url>,
 
-    client: Arc<ClientRef>,
+        client: Arc<ClientRef>,
 
-    in_flight: ResponseFuture,
-    timeout: Option<Delay>,
+        #[pin]
+        in_flight: ResponseFuture,
+        #[pin]
+        timeout: Option<Delay>,
+    }
 }
 
 impl PendingRequest {
     fn in_flight(self: Pin<&mut Self>) -> Pin<&mut ResponseFuture> {
-        unsafe { Pin::map_unchecked_mut(self, |x| &mut x.in_flight) }
+        self.project().in_flight
     }
 
     fn timeout(self: Pin<&mut Self>) -> Pin<&mut Option<Delay>> {
-        unsafe { Pin::map_unchecked_mut(self, |x| &mut x.timeout) }
+        self.project().timeout
     }
 
     fn urls(self: Pin<&mut Self>) -> &mut Vec<Url> {
-        unsafe { &mut Pin::get_unchecked_mut(self).urls }
+        self.project().urls
     }
 
     fn headers(self: Pin<&mut Self>) -> &mut HeaderMap {
-        unsafe { &mut Pin::get_unchecked_mut(self).headers }
+        self.project().headers
     }
 }
 
@@ -1242,7 +1347,7 @@ impl Pending {
     }
 
     fn inner(self: Pin<&mut Self>) -> Pin<&mut PendingInner> {
-        unsafe { Pin::map_unchecked_mut(self, |x| &mut x.inner) }
+        self.project().inner
     }
 }
 
@@ -1284,11 +1389,14 @@ impl Future for PendingRequest {
             #[cfg(feature = "cookies")]
             {
                 if let Some(store_wrapper) = self.client.cookie_store.as_ref() {
-                    let mut store = store_wrapper.write().unwrap();
-                    let cookies = cookie::extract_response_cookies(&res.headers())
+                    let mut cookies = cookie::extract_response_cookies(&res.headers())
                         .filter_map(|res| res.ok())
-                        .map(|cookie| cookie.into_inner().into_owned());
-                    store.0.store_response_cookies(cookies, &self.url);
+                        .map(|cookie| cookie.into_inner().into_owned())
+                        .peekable();
+                    if cookies.peek().is_some() {
+                      let mut store = store_wrapper.write().unwrap();
+                      store.0.store_response_cookies(cookies, &self.url);
+                    }
                 }
             }
             let should_redirect = match res.status() {
@@ -1453,5 +1561,25 @@ fn add_cookie_header(headers: &mut HeaderMap, cookie_store: &cookie::CookieStore
             crate::header::COOKIE,
             HeaderValue::from_bytes(header.as_bytes()).unwrap(),
         );
+    }
+}
+
+#[cfg(feature = "rustls-tls-native-roots")]
+lazy_static! {
+    static ref NATIVE_ROOTS: std::io::Result<RootCertStore> = rustls_native_certs::load_native_certs().map_err(|e| e.1);
+}
+
+#[cfg(test)]
+mod tests {
+    #[tokio::test]
+    async fn execute_request_rejects_invald_urls() {
+        let url_str = "hxxps://www.rust-lang.org/";
+        let url = url::Url::parse(url_str).unwrap();
+        let result = crate::get(url.clone()).await;
+
+        assert!(result.is_err());
+        let err = result.err().unwrap();
+        assert!(err.is_builder());
+        assert_eq!(url_str, err.url().unwrap().as_str());
     }
 }

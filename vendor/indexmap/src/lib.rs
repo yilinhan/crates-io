@@ -1,6 +1,8 @@
+// We *mostly* avoid unsafe code, but `map::core::raw` allows it to use `RawTable` buckets.
 #![deny(unsafe_code)]
+#![warn(rust_2018_idioms)]
 #![doc(html_root_url = "https://docs.rs/indexmap/1/")]
-#![cfg_attr(not(has_std), no_std)]
+#![no_std]
 
 //! [`IndexMap`] is a hash table where the iteration order of the key-value
 //! pairs is independent of the hash values of the keys.
@@ -24,11 +26,34 @@
 //! - The [`MutableKeys`][map::MutableKeys] trait, which gives opt-in mutable
 //!   access to hash map keys.
 //!
+//! ### Alternate Hashers
+//!
+//! [`IndexMap`] and [`IndexSet`] have a default hasher type `S = RandomState`,
+//! just like the standard `HashMap` and `HashSet`, which is resistant to
+//! HashDoS attacks but not the most performant. Type aliases can make it easier
+//! to use alternate hashers:
+//!
+//! ```
+//! use fnv::FnvBuildHasher;
+//! use fxhash::FxBuildHasher;
+//! use indexmap::{IndexMap, IndexSet};
+//!
+//! type FnvIndexMap<K, V> = IndexMap<K, V, FnvBuildHasher>;
+//! type FnvIndexSet<T> = IndexSet<T, FnvBuildHasher>;
+//!
+//! type FxIndexMap<K, V> = IndexMap<K, V, FxBuildHasher>;
+//! type FxIndexSet<T> = IndexSet<T, FxBuildHasher>;
+//!
+//! let std: IndexSet<i32> = (0..100).collect();
+//! let fnv: FnvIndexSet<i32> = (0..100).collect();
+//! let fx: FxIndexSet<i32> = (0..100).collect();
+//! assert_eq!(std, fnv);
+//! assert_eq!(std, fx);
+//! ```
+//!
 //! ### Rust Version
 //!
-//! This version of indexmap requires Rust 1.18 or later, or 1.30+ for
-//! development builds, and Rust 1.36+ for using with `alloc` (without `std`),
-//! see below.
+//! This version of indexmap requires Rust 1.36 or later.
 //!
 //! The indexmap 1.x release series will use a carefully considered version
 //! upgrade policy, where in a later 1.x version, we will raise the minimum
@@ -36,7 +61,7 @@
 //!
 //! ## No Standard Library Targets
 //!
-//! From Rust 1.36, this crate supports being built without `std`, requiring
+//! This crate supports being built without `std`, requiring
 //! `alloc` instead. This is enabled automatically when it is detected that
 //! `std` is not available. There is no crate feature to enable/disable to
 //! trigger this. It can be tested by building for a std-less target.
@@ -53,30 +78,26 @@
 //! [def]: map/struct.IndexMap.html#impl-Default
 
 #[cfg(not(has_std))]
-#[macro_use(vec)]
 extern crate alloc;
 
-#[cfg(not(has_std))]
-pub(crate) mod std {
-    pub use core::*;
-    pub mod alloc {
-        pub use alloc::*;
-    }
-    pub mod collections {
-        pub use alloc::collections::*;
-    }
-    pub use alloc::vec;
-}
+#[cfg(has_std)]
+#[macro_use]
+extern crate std;
 
 #[cfg(not(has_std))]
-use std::vec::Vec;
+use alloc::vec::{self, Vec};
+
+#[cfg(has_std)]
+use std::vec::{self, Vec};
 
 #[macro_use]
 mod macros;
 mod equivalent;
 mod mutable_keys;
-#[cfg(feature = "serde-1")]
+#[cfg(feature = "serde")]
 mod serde;
+#[cfg(feature = "serde")]
+pub mod serde_seq;
 mod util;
 
 pub mod map;
@@ -87,42 +108,49 @@ pub mod set;
 #[cfg(feature = "rayon")]
 mod rayon;
 
-pub use equivalent::Equivalent;
-pub use map::IndexMap;
-pub use set::IndexSet;
+pub use crate::equivalent::Equivalent;
+pub use crate::map::IndexMap;
+pub use crate::set::IndexSet;
 
 // shared private items
 
 /// Hash value newtype. Not larger than usize, since anything larger
 /// isn't used for selecting position anyway.
-#[derive(Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 struct HashValue(usize);
 
 impl HashValue {
     #[inline(always)]
-    fn get(self) -> usize {
-        self.0
+    fn get(self) -> u64 {
+        self.0 as u64
     }
 }
 
-impl Clone for HashValue {
-    #[inline]
-    fn clone(&self) -> Self {
-        *self
-    }
-}
-impl PartialEq for HashValue {
-    #[inline]
-    fn eq(&self, rhs: &Self) -> bool {
-        self.0 == rhs.0
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Debug)]
 struct Bucket<K, V> {
     hash: HashValue,
     key: K,
     value: V,
+}
+
+impl<K, V> Clone for Bucket<K, V>
+where
+    K: Clone,
+    V: Clone,
+{
+    fn clone(&self) -> Self {
+        Bucket {
+            hash: self.hash,
+            key: self.key.clone(),
+            value: self.value.clone(),
+        }
+    }
+
+    fn clone_from(&mut self, other: &Self) {
+        self.hash = other.hash;
+        self.key.clone_from(&other.key);
+        self.value.clone_from(&other.value);
+    }
 }
 
 impl<K, V> Bucket<K, V> {

@@ -1,3 +1,44 @@
+# Version 0.14
+
+## Version 0.14.2 (Jul 22, 2020)
+
+### Changes and Fixes
+
+  * Documentation now builds on the stable channel.
+  * `rust-crypto` dependencies were updated to their latest versions.
+  * Fixed 'interator' -> 'iterator' documentation typo.
+
+## Version 0.14.1 (Jun 5, 2020)
+
+### Changes and Fixes
+
+  * Updated `base64` dependency to 0.12.
+  * Updated minimum `time` dependency to correct version: 0.2.11.
+  * Added `readme` key to `Cargo.toml`, updated `license` field.
+
+## Version 0.14.0 (May 29, 2020)
+
+### Breaking Changes
+
+  * The `Key::from_master()` method was deprecated in favor of the more aptly
+    named `Key::derive_from()`.
+  * The deprecated `CookieJar::clear()` method was removed.
+
+### New Features
+
+  * Added `Key::from()` to create a `Key` structure from a full-length key.
+  * Signed and private cookie jars can be individually enabled via the new
+    `signed` and `private` features, respectively.
+  * Key derivation via key expansion can be individually enabled via the new
+    `key-expansion` feature.
+
+### General Changes and Fixes
+
+  * `ring` is no longer a dependency: `RustCrypto`-based cryptography is used in
+    lieu of `ring`. Prior to their inclusion here, the `hmac` and `hkdf` crates
+    were audited.
+  * Quotes, if present, are stripped from cookie values when parsing.
+
 # Version 0.13
 
 ## Version 0.13.3 (Feb 3, 2020)

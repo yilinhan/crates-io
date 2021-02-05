@@ -3,23 +3,44 @@ cfg_io_driver! {
     pub(crate) mod slab;
 }
 
-cfg_sync! {
-    pub(crate) mod linked_list;
-}
+#[cfg(any(
+    feature = "fs",
+    feature = "net",
+    feature = "process",
+    feature = "rt",
+    feature = "sync",
+    feature = "signal",
+    feature = "time",
+))]
+pub(crate) mod linked_list;
 
-#[cfg(any(feature = "rt-threaded", feature = "macros", feature = "stream"))]
+#[cfg(any(feature = "rt-multi-thread", feature = "macros"))]
 mod rand;
 
-cfg_rt_threaded! {
-    mod pad;
-    pub(crate) use pad::CachePadded;
+cfg_rt! {
+    mod wake;
+    pub(crate) use wake::WakerRef;
+    pub(crate) use wake::{waker_ref, Wake};
+}
 
+cfg_rt_multi_thread! {
     pub(crate) use rand::FastRand;
 
     mod try_lock;
     pub(crate) use try_lock::TryLock;
 }
 
-#[cfg(any(feature = "macros", feature = "stream"))]
+pub(crate) mod trace;
+
+#[cfg(any(feature = "macros"))]
 #[cfg_attr(not(feature = "macros"), allow(unreachable_pub))]
 pub use rand::thread_rng_n;
+
+#[cfg(any(
+    feature = "rt",
+    feature = "time",
+    feature = "net",
+    feature = "process",
+    all(unix, feature = "signal")
+))]
+pub(crate) mod error;

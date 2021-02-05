@@ -155,6 +155,7 @@ The following features are available:
 */
 
 #![deny(missing_docs)]
+#![warn(missing_debug_implementations)]
 #![forbid(unsafe_code)]
 
 pub use error::{Error, Result};
@@ -175,7 +176,7 @@ pub mod utf8;
 /// The string returned may be safely used as a literal in a regular
 /// expression.
 pub fn escape(text: &str) -> String {
-    let mut quoted = String::with_capacity(text.len());
+    let mut quoted = String::new();
     escape_into(text, &mut quoted);
     quoted
 }
@@ -185,6 +186,7 @@ pub fn escape(text: &str) -> String {
 /// This will append escape characters into the given buffer. The characters
 /// that are appended are safe to use as a literal in a regular expression.
 pub fn escape_into(text: &str, buf: &mut String) {
+    buf.reserve(text.len());
     for c in text.chars() {
         if is_meta_character(c) {
             buf.push('\\');
@@ -197,7 +199,7 @@ pub fn escape_into(text: &str, buf: &mut String) {
 ///
 /// These are the only characters that are allowed to be escaped, with one
 /// exception: an ASCII space character may be escaped when extended mode (with
-/// the `x` flag) is enabld. In particular, `is_meta_character(' ')` returns
+/// the `x` flag) is enabled. In particular, `is_meta_character(' ')` returns
 /// `false`.
 ///
 /// Note that the set of characters for which this function returns `true` or

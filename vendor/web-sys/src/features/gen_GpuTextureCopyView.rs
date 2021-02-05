@@ -4,7 +4,7 @@ use wasm_bindgen::prelude::*;
 #[cfg(web_sys_unstable_apis)]
 #[wasm_bindgen]
 extern "C" {
-    # [ wasm_bindgen ( extends = :: js_sys :: Object , js_name = GPUTextureCopyView ) ]
+    # [wasm_bindgen (extends = :: js_sys :: Object , js_name = GPUTextureCopyView)]
     #[derive(Debug, Clone, PartialEq, Eq)]
     #[doc = "The `GpuTextureCopyView` dictionary."]
     #[doc = ""]
@@ -30,19 +30,17 @@ impl GpuTextureCopyView {
         ret
     }
     #[cfg(web_sys_unstable_apis)]
-    #[doc = "Change the `arrayLayer` field of this object."]
+    #[cfg(feature = "GpuTextureAspect")]
+    #[doc = "Change the `aspect` field of this object."]
     #[doc = ""]
-    #[doc = "*This API requires the following crate features to be activated: `GpuTextureCopyView`*"]
+    #[doc = "*This API requires the following crate features to be activated: `GpuTextureAspect`, `GpuTextureCopyView`*"]
     #[doc = ""]
     #[doc = "*This API is unstable and requires `--cfg=web_sys_unstable_apis` to be activated, as"]
     #[doc = "[described in the `wasm-bindgen` guide](https://rustwasm.github.io/docs/wasm-bindgen/web-sys/unstable-apis.html)*"]
-    pub fn array_layer(&mut self, val: u32) -> &mut Self {
+    pub fn aspect(&mut self, val: GpuTextureAspect) -> &mut Self {
         use wasm_bindgen::JsValue;
-        let r = ::js_sys::Reflect::set(
-            self.as_ref(),
-            &JsValue::from("arrayLayer"),
-            &JsValue::from(val),
-        );
+        let r =
+            ::js_sys::Reflect::set(self.as_ref(), &JsValue::from("aspect"), &JsValue::from(val));
         debug_assert!(
             r.is_ok(),
             "setting properties should never fail on our dictionary objects"

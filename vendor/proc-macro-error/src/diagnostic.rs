@@ -1,4 +1,4 @@
-use crate::{abort_now, check_correctness, sealed::Sealed, SpanRange};
+use crate::abort_now;
 use proc_macro2::Span;
 use proc_macro2::TokenStream;
 
@@ -21,78 +21,11 @@ pub enum Level {
 #[derive(Debug)]
 pub struct Diagnostic {
     pub(crate) level: Level,
-    pub(crate) span_range: SpanRange,
+    pub(crate) start: Span,
+    pub(crate) end: Span,
     pub(crate) msg: String,
-    pub(crate) suggestions: Vec<(SuggestionKind, String, Option<SpanRange>)>,
-    pub(crate) children: Vec<(SpanRange, String)>,
-}
-
-/// A collection of methods that do not exist in `proc_macro::Diagnostic`
-/// but still useful to have around.
-///
-/// This trait is sealed and cannot be implemented outside of `proc_macro_error`.
-pub trait DiagnosticExt: Sealed {
-    /// Create a new diagnostic message that points to the `span_range`.
-    ///
-    /// This function is the same as `Diagnostic::spanned` but produces considerably
-    /// better error messages for multi-token spans on stable.
-    fn spanned_range(span_range: SpanRange, level: Level, message: String) -> Self;
-
-    /// Add another error message to self such that it will be emitted right after
-    /// the main message.
-    ///
-    /// This function is the same as `Diagnostic::span_error` but produces considerably
-    /// better error messages for multi-token spans on stable.
-    fn span_range_error(self, span_range: SpanRange, msg: String) -> Self;
-
-    /// Attach a "help" note to your main message, the note will have it's own span on nightly.
-    ///
-    /// This function is the same as `Diagnostic::span_help` but produces considerably
-    /// better error messages for multi-token spans on stable.
-    ///
-    /// # Span
-    ///
-    /// The span is ignored on stable, the note effectively inherits its parent's (main message) span
-    fn span_range_help(self, span_range: SpanRange, msg: String) -> Self;
-
-    /// Attach a note to your main message, the note will have it's own span on nightly.
-    ///
-    /// This function is the same as `Diagnostic::span_note` but produces considerably
-    /// better error messages for multi-token spans on stable.
-    ///
-    /// # Span
-    ///
-    /// The span is ignored on stable, the note effectively inherits its parent's (main message) span
-    fn span_range_note(self, span_range: SpanRange, msg: String) -> Self;
-}
-
-impl DiagnosticExt for Diagnostic {
-    fn spanned_range(span_range: SpanRange, level: Level, message: String) -> Self {
-        Diagnostic {
-            level,
-            span_range,
-            msg: message,
-            suggestions: vec![],
-            children: vec![],
-        }
-    }
-
-    fn span_range_error(mut self, span_range: SpanRange, msg: String) -> Self {
-        self.children.push((span_range, msg));
-        self
-    }
-
-    fn span_range_help(mut self, span_range: SpanRange, msg: String) -> Self {
-        self.suggestions
-            .push((SuggestionKind::Help, msg, Some(span_range)));
-        self
-    }
-
-    fn span_range_note(mut self, span_range: SpanRange, msg: String) -> Self {
-        self.suggestions
-            .push((SuggestionKind::Note, msg, Some(span_range)));
-        self
-    }
+    pub(crate) suggestions: Vec<(SuggestionKind, String, Option<Span>)>,
+    pub(crate) children: Vec<(Span, Span, String)>,
 }
 
 impl Diagnostic {
@@ -103,26 +36,13 @@ impl Diagnostic {
 
     /// Create a new diagnostic message that points to the `span`
     pub fn spanned(span: Span, level: Level, message: String) -> Self {
-        Diagnostic::spanned_range(
-            SpanRange {
-                first: span,
-                last: span,
-            },
-            level,
-            message,
-        )
+        Diagnostic::double_spanned(span, span, level, message)
     }
 
     /// Add another error message to self such that it will be emitted right after
     /// the main message.
     pub fn span_error(self, span: Span, msg: String) -> Self {
-        self.span_range_error(
-            SpanRange {
-                first: span,
-                last: span,
-            },
-            msg,
-        )
+        self.double_span_error(span, span, msg)
     }
 
     /// Attach a "help" note to your main message, the note will have it's own span on nightly.
@@ -130,14 +50,10 @@ impl Diagnostic {
     /// # Span
     ///
     /// The span is ignored on stable, the note effectively inherits its parent's (main message) span
-    pub fn span_help(self, span: Span, msg: String) -> Self {
-        self.span_range_help(
-            SpanRange {
-                first: span,
-                last: span,
-            },
-            msg,
-        )
+    pub fn span_help(mut self, span: Span, msg: String) -> Self {
+        self.suggestions
+            .push((SuggestionKind::Help, msg, Some(span)));
+        self
     }
 
     /// Attach a "help" note to your main message.
@@ -151,14 +67,10 @@ impl Diagnostic {
     /// # Span
     ///
     /// The span is ignored on stable, the note effectively inherits its parent's (main message) span
-    pub fn span_note(self, span: Span, msg: String) -> Self {
-        self.span_range_note(
-            SpanRange {
-                first: span,
-                last: span,
-            },
-            msg,
-        )
+    pub fn span_note(mut self, span: Span, msg: String) -> Self {
+        self.suggestions
+            .push((SuggestionKind::Note, msg, Some(span)));
+        self
     }
 
     /// Attach a note to your main message
@@ -176,7 +88,7 @@ impl Diagnostic {
     ///
     /// # Warnings
     ///
-    /// Warnings are not emitted on stable and beta, but this function will abort anyway.
+    /// Warnings do not get emitted on stable/beta but this function will abort anyway.
     pub fn abort(self) -> ! {
         self.emit();
         abort_now()
@@ -188,7 +100,6 @@ impl Diagnostic {
     ///
     /// Warnings are ignored on stable/beta
     pub fn emit(self) {
-        check_correctness();
         crate::imp::emit_diagnostic(self);
     }
 }
@@ -196,6 +107,22 @@ impl Diagnostic {
 /// **NOT PUBLIC API! NOTHING TO SEE HERE!!!**
 #[doc(hidden)]
 impl Diagnostic {
+    pub fn double_spanned(start: Span, end: Span, level: Level, message: String) -> Self {
+        Diagnostic {
+            level,
+            start,
+            end,
+            msg: message,
+            suggestions: vec![],
+            children: vec![],
+        }
+    }
+
+    pub fn double_span_error(mut self, start: Span, end: Span, msg: String) -> Self {
+        self.children.push((start, end, msg));
+        self
+    }
+
     pub fn span_suggestion(self, span: Span, suggestion: &str, msg: String) -> Self {
         match suggestion {
             "help" | "hint" => self.span_help(span, msg),
@@ -225,10 +152,11 @@ impl ToTokens for Diagnostic {
         }
 
         fn diag_to_tokens(
-            span_range: SpanRange,
+            start: Span,
+            end: Span,
             level: &Level,
             msg: &str,
-            suggestions: &[(SuggestionKind, String, Option<SpanRange>)],
+            suggestions: &[(SuggestionKind, String, Option<Span>)],
         ) -> TokenStream {
             if *level == Level::Warning {
                 return TokenStream::new();
@@ -252,14 +180,14 @@ impl ToTokens for Diagnostic {
                 Cow::Owned(message)
             };
 
-            let mut msg = proc_macro2::Literal::string(&message);
-            msg.set_span(span_range.last);
-            let group = quote_spanned!(span_range.last=> { #msg } );
-            quote_spanned!(span_range.first=> compile_error!#group)
+            let msg = syn::LitStr::new(&*message, end);
+            let group = quote_spanned!(end=> { #msg } );
+            quote_spanned!(start=> compile_error!#group)
         }
 
         ts.extend(diag_to_tokens(
-            self.span_range,
+            self.start,
+            self.end,
             &self.level,
             &self.msg,
             &self.suggestions,
@@ -267,7 +195,7 @@ impl ToTokens for Diagnostic {
         ts.extend(
             self.children
                 .iter()
-                .map(|(span_range, msg)| diag_to_tokens(*span_range, &Level::Error, &msg, &[])),
+                .map(|(start, end, msg)| diag_to_tokens(*start, *end, &Level::Error, &msg, &[])),
         );
     }
 }
@@ -287,13 +215,12 @@ impl SuggestionKind {
     }
 }
 
-#[cfg(feature = "syn-error")]
 impl From<syn::Error> for Diagnostic {
     fn from(err: syn::Error) -> Self {
-        use proc_macro2::{Delimiter, TokenTree};
+        use proc_macro2::TokenTree;
 
-        fn gut_error(ts: &mut impl Iterator<Item = TokenTree>) -> Option<(SpanRange, String)> {
-            let first = match ts.next() {
+        fn gut_error(ts: &mut impl Iterator<Item = TokenTree>) -> Option<(Span, Span, String)> {
+            let start = match ts.next() {
                 // compile_error
                 None => return None,
                 Some(tt) => tt.span(),
@@ -301,47 +228,28 @@ impl From<syn::Error> for Diagnostic {
             ts.next().unwrap(); // !
 
             let lit = match ts.next().unwrap() {
-                TokenTree::Group(group) => {
-                    // Currently `syn` builds `compile_error!` invocations
-                    // exclusively in `ident{"..."}` (braced) form which is not
-                    // followed by `;` (semicolon).
-                    //
-                    // But if it changes to `ident("...");` (parenthesized)
-                    // or `ident["..."];` (bracketed) form,
-                    // we will need to skip the `;` as well.
-                    // Highly unlikely, but better safe than sorry.
-
-                    if group.delimiter() == Delimiter::Parenthesis
-                        || group.delimiter() == Delimiter::Bracket
-                    {
-                        ts.next().unwrap(); // ;
-                    }
-
-                    match group.stream().into_iter().next().unwrap() {
-                        TokenTree::Literal(lit) => lit,
-                        _ => unreachable!(),
-                    }
-                }
+                TokenTree::Group(group) => match group.stream().into_iter().next().unwrap() {
+                    TokenTree::Literal(lit) => lit,
+                    _ => unreachable!(),
+                },
                 _ => unreachable!(),
             };
 
-            let last = lit.span();
+            let end = lit.span();
             let mut msg = lit.to_string();
-
-            // "abc" => abc
             msg.pop();
             msg.remove(0);
 
-            Some((SpanRange { first, last }, msg))
+            Some((start, end, msg))
         }
 
         let mut ts = err.to_compile_error().into_iter();
 
-        let (span_range, msg) = gut_error(&mut ts).unwrap();
-        let mut res = Diagnostic::spanned_range(span_range, Level::Error, msg);
+        let (start, end, msg) = gut_error(&mut ts).unwrap();
+        let mut res = Diagnostic::double_spanned(start, end, Level::Error, msg);
 
-        while let Some((span_range, msg)) = gut_error(&mut ts) {
-            res = res.span_range_error(span_range, msg);
+        while let Some((start, end, msg)) = gut_error(&mut ts) {
+            res = res.double_span_error(start, end, msg);
         }
 
         res

@@ -24,13 +24,14 @@ pub(crate) fn cleanup() -> Vec<Diagnostic> {
 pub(crate) fn emit_diagnostic(diag: Diagnostic) {
     let Diagnostic {
         level,
-        span_range,
+        start,
+        end,
         msg,
         suggestions,
         children,
     } = diag;
 
-    let span = span_range.collapse().unwrap();
+    let span = start.join(end).unwrap_or(start);
 
     let level = match level {
         Level::Warning => PLevel::Warning,
@@ -41,23 +42,19 @@ pub(crate) fn emit_diagnostic(diag: Diagnostic) {
         _ => unreachable!(),
     };
 
-    let mut res = PDiag::spanned(span, level, msg);
+    let mut res = PDiag::spanned(span.unwrap(), level, msg);
 
     for (kind, msg, span) in suggestions {
         res = match (kind, span) {
-            (SuggestionKind::Note, Some(span_range)) => {
-                res.span_note(span_range.collapse().unwrap(), msg)
-            }
-            (SuggestionKind::Help, Some(span_range)) => {
-                res.span_help(span_range.collapse().unwrap(), msg)
-            }
+            (SuggestionKind::Note, Some(span)) => res.span_note(span.unwrap(), msg),
+            (SuggestionKind::Help, Some(span)) => res.span_help(span.unwrap(), msg),
             (SuggestionKind::Note, None) => res.note(msg),
             (SuggestionKind::Help, None) => res.help(msg),
         }
     }
 
-    for (span_range, msg) in children {
-        let span = span_range.collapse().unwrap();
+    for (start, end, msg) in children {
+        let span = start.join(end).unwrap_or(start).unwrap();
         res = res.span_error(span, msg);
     }
 
